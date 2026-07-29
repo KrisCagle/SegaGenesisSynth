@@ -29,6 +29,33 @@
                 "isDefault": true
             },
             "problemMatcher": ["$gcc"]
+        },
+        {
+            "label": "Build Desktop UI",
+            "type": "shell",
+            "command": "gcc",
+            "args": [
+                "-std=c11",
+                "-Wall",
+                "-Wextra",
+                "-g",
+                "-Isynth-core/include",
+                "desktop/main.c",
+                "synth-core/src/psg.c",
+                "synth-core/src/ym2612.c",
+                "-o",
+                "build/genesis_synth.exe",
+                "-lraylib",
+                "-lopengl32",
+                "-lgdi32",
+                "-lwinmm",
+                "-lm"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": "build",
+            "problemMatcher": ["$gcc"]
         }
     ]
 }
