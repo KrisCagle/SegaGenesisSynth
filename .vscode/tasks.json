@@ -41,6 +41,7 @@
                 "-g",
                 "-Isynth-core/include",
                 "desktop/main.c",
+                "desktop/midi_input.c",
                 "synth-core/src/psg.c",
                 "synth-core/src/ym2612.c",
                 "-o",
