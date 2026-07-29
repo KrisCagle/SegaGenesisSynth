@@ -14,14 +14,16 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <math.h>
 #include "raylib.h"
 
 #include "psg.h"
 #include "ym2612.h"
+#include "midi_input.h" /* no windows.h in this file -- see midi_input.h for why */
 
 #define SCREEN_W 1150
-#define SCREEN_H 780
+#define SCREEN_H 880
 #define OUTPUT_SAMPLE_RATE 48000
 
 /* ---- Audio engine ---- */
@@ -30,13 +32,32 @@ static Ym2612Chip g_chip;
 static const double FM_TICKS_PER_SAMPLE = YM2612_SAMPLE_HZ / OUTPUT_SAMPLE_RATE;
 static double g_fm_tick_accum = 0.0;
 
+static Psg g_psg;
+static const double PSG_TICKS_PER_SAMPLE = PSG_TICK_HZ / OUTPUT_SAMPLE_RATE;
+static double g_psg_tick_accum = 0.0;
+
+/* ---- WAV recording (captures the final mixed output) ---- */
+
+#define RECORD_MAX_FRAMES ((size_t)OUTPUT_SAMPLE_RATE * 60 * 5) /* 5 minutes, stereo */
+
+static int16_t *g_record_buffer = NULL;
+static size_t g_record_frames = 0;
+static int g_recording = 0;
+
+static void record_push(int16_t left, int16_t right) {
+    if (!g_recording || !g_record_buffer || g_record_frames >= RECORD_MAX_FRAMES) return;
+    g_record_buffer[g_record_frames * 2 + 0] = left;
+    g_record_buffer[g_record_frames * 2 + 1] = right;
+    g_record_frames++;
+}
+
 static void AudioStreamCallback(void *buffer_data, unsigned int frames) {
     int16_t *out = (int16_t *)buffer_data;
     unsigned int i;
 
     for (i = 0; i < frames; i++) {
-        int32_t left_sum = 0, right_sum = 0;
-        int fm_n, k;
+        int32_t left_sum = 0, right_sum = 0, psg_sum = 0;
+        int fm_n, psg_n, k;
 
         g_fm_tick_accum += FM_TICKS_PER_SAMPLE;
         fm_n = (int)g_fm_tick_accum;
@@ -50,10 +71,65 @@ static void AudioStreamCallback(void *buffer_data, unsigned int frames) {
             right_sum += r;
         }
 
-        out[i * 2 + 0] = clamp_s16(left_sum / fm_n);
-        out[i * 2 + 1] = clamp_s16(right_sum / fm_n);
+        g_psg_tick_accum += PSG_TICKS_PER_SAMPLE;
+        psg_n = (int)g_psg_tick_accum;
+        if (psg_n < 1) psg_n = 1;
+        g_psg_tick_accum -= psg_n;
+
+        for (k = 0; k < psg_n; k++) {
+            psg_sum += psg_clock(&g_psg);
+        }
+
+        {
+            int16_t psg_avg = (int16_t)(psg_sum / psg_n);
+            int16_t left = clamp_s16(left_sum / fm_n + psg_avg);
+            int16_t right = clamp_s16(right_sum / fm_n + psg_avg);
+            out[i * 2 + 0] = left;
+            out[i * 2 + 1] = right;
+            record_push(left, right);
+        }
     }
 }
+
+/* ---- PSG register-write helpers (same real protocol as pc/main.c) ---- */
+
+static void psg_set_tone(Psg *psg, int channel, double freq_hz) {
+    uint16_t n = (uint16_t)(PSG_CLOCK_HZ / (32.0 * freq_hz) + 0.5);
+    if (n > 0x3FF) n = 0x3FF;
+    psg_write(psg, (uint8_t)(0x80 | (channel << 5) | (n & 0x0F)));
+    psg_write(psg, (uint8_t)((n >> 4) & 0x3F));
+}
+
+static void psg_set_volume(Psg *psg, int channel, uint8_t attenuation) {
+    psg_write(psg, (uint8_t)(0x80 | (channel << 5) | 0x10 | (attenuation & 0x0F)));
+}
+
+static void psg_set_noise(Psg *psg, uint8_t control) {
+    psg_write(psg, (uint8_t)(0x80 | (3 << 5) | (control & 0x07)));
+}
+
+/* PSG state, driven from the UI (see the PSG panel in main()). Tone
+ * channels 0-2 shadow whichever of the first 3 FM voice slots are active,
+ * playing the same note in unison -- PSG only has 3 tone channels vs FM's
+ * 6, so voice slots 3-5 don't get a PSG double. */
+static int g_psg_level = 0;      /* 0-15, UI "louder is bigger" (inverted to attenuation internally) */
+static int g_noise_on = 0;
+static int g_noise_white = 1;
+static int g_noise_rate = 1;     /* 0-3, the real 2-bit rate field */
+static int g_noise_volume = 10;  /* 0-15 */
+
+static void apply_noise(void) {
+    uint8_t control = (uint8_t)((g_noise_white ? 0x04 : 0x00) | (g_noise_rate & 0x03));
+    psg_set_noise(&g_psg, control);
+    psg_set_volume(&g_psg, 3, g_noise_on ? (uint8_t)(15 - g_noise_volume) : 15);
+}
+
+/* Re-applies g_psg_level to any voice slots 0-2 that are currently
+ * sounding, so dragging the slider mid-note takes effect immediately
+ * instead of waiting for the next note-on. Voice-active state lives in
+ * g_voices (defined below), so this is called from main()'s loop, not
+ * inline with the other PSG helpers above. */
+static void refresh_psg_level(void);
 
 /* ---- Register-write helpers (same real protocol as pc/main.c) ---- */
 
@@ -84,13 +160,27 @@ static void chip_key(Ym2612Chip *chip, int global_chan, uint8_t op_on_bits) {
 
 typedef struct {
     int mul;  /* 0-15 register field (0 = x0.5) */
-    int dt;   /* 0-7 detune (4 = none; not exposed as a slider yet, presets use it) */
+    int dt;   /* 0-7 detune (4 = none) */
     int tl;   /* 0-127, 0 = loudest */
     int ar;   /* 0-31 */
     int d1r;  /* 0-31 */
+    int d2r;  /* 0-31, secondary decay rate while sustaining */
     int sl;   /* 0-15 */
     int rr;   /* 0-15 */
+    int ssg_enable; /* 0/1: SSG-EG hardware envelope-looping mode */
+    int ssg_mode;   /* 0-7: which of the 8 SSG-EG shapes */
+    int mute; /* UI-only: force silent regardless of tl */
+    int solo; /* UI-only: if any operator is soloed, non-soloed ones are forced silent */
 } OperatorParams;
+
+/* Fills in the common defaults (d2r/SSG/mute/solo all off) so the existing
+ * default patch and presets below don't need updating for every new field. */
+static OperatorParams mk_op(int mul, int dt, int tl, int ar, int d1r, int sl, int rr) {
+    OperatorParams o;
+    o.mul = mul; o.dt = dt; o.tl = tl; o.ar = ar; o.d1r = d1r; o.d2r = 0;
+    o.sl = sl; o.rr = rr; o.ssg_enable = 0; o.ssg_mode = 0; o.mute = 0; o.solo = 0;
+    return o;
+}
 
 typedef struct {
     int algo;         /* 0-7 */
@@ -108,10 +198,10 @@ static PatchParams default_patch(void) {
     p.ams = 0;
     p.pms = 0;
     p.am_enable = 0;
-    p.op[0] = (OperatorParams){ 1, 4, 22, 31, 10, 4, 8 };  /* OP1: modulator */
-    p.op[1] = (OperatorParams){ 1, 4, 26, 31, 10, 4, 8 };  /* OP2: modulator */
-    p.op[2] = (OperatorParams){ 1, 4, 30, 31, 10, 4, 8 };  /* OP3: modulator */
-    p.op[3] = (OperatorParams){ 1, 4, 5, 31, 10, 4, 8 };   /* OP4: carrier, loud */
+    p.op[0] = mk_op(1, 4, 22, 31, 10, 4, 8);  /* OP1: modulator */
+    p.op[1] = mk_op(1, 4, 26, 31, 10, 4, 8);  /* OP2: modulator */
+    p.op[2] = mk_op(1, 4, 30, 31, 10, 4, 8);  /* OP3: modulator */
+    p.op[3] = mk_op(1, 4, 5, 31, 10, 4, 8);   /* OP4: carrier, loud */
     return p;
 }
 
@@ -120,46 +210,46 @@ static PatchParams default_patch(void) {
 static PatchParams preset_epiano(void) {
     PatchParams p = { 0 };
     p.algo = 4; p.feedback = 0;
-    p.op[0] = (OperatorParams){ 1, 4, 8, 31, 8, 3, 7 };
-    p.op[1] = (OperatorParams){ 1, 4, 2, 27, 6, 3, 6 };
-    p.op[2] = (OperatorParams){ 2, 4, 16, 31, 12, 3, 8 };
-    p.op[3] = (OperatorParams){ 1, 4, 10, 27, 8, 3, 7 };
+    p.op[0] = mk_op(1, 4, 8, 31, 8, 3, 7);
+    p.op[1] = mk_op(1, 4, 2, 27, 6, 3, 6);
+    p.op[2] = mk_op(2, 4, 16, 31, 12, 3, 8);
+    p.op[3] = mk_op(1, 4, 10, 27, 8, 3, 7);
     return p;
 }
 static PatchParams preset_bass(void) {
     PatchParams p = { 0 };
     p.algo = 0; p.feedback = 3;
-    p.op[0] = (OperatorParams){ 1, 4, 28, 31, 14, 6, 10 };
-    p.op[1] = (OperatorParams){ 2, 4, 32, 31, 14, 6, 10 };
-    p.op[2] = (OperatorParams){ 1, 4, 20, 31, 10, 4, 9 };
-    p.op[3] = (OperatorParams){ 1, 4, 4, 31, 8, 2, 9 };
+    p.op[0] = mk_op(1, 4, 28, 31, 14, 6, 10);
+    p.op[1] = mk_op(2, 4, 32, 31, 14, 6, 10);
+    p.op[2] = mk_op(1, 4, 20, 31, 10, 4, 9);
+    p.op[3] = mk_op(1, 4, 4, 31, 8, 2, 9);
     return p;
 }
 static PatchParams preset_bell(void) {
     PatchParams p = { 0 };
     p.algo = 5; p.feedback = 0;
-    p.op[0] = (OperatorParams){ 1, 7, 8, 31, 6, 2, 6 };
-    p.op[1] = (OperatorParams){ 1, 4, 6, 31, 4, 1, 5 };
-    p.op[2] = (OperatorParams){ 2, 4, 14, 31, 6, 2, 6 };
-    p.op[3] = (OperatorParams){ 3, 4, 20, 31, 8, 3, 7 };
+    p.op[0] = mk_op(1, 7, 8, 31, 6, 2, 6);
+    p.op[1] = mk_op(1, 4, 6, 31, 4, 1, 5);
+    p.op[2] = mk_op(2, 4, 14, 31, 6, 2, 6);
+    p.op[3] = mk_op(3, 4, 20, 31, 8, 3, 7);
     return p;
 }
 static PatchParams preset_brass(void) {
     PatchParams p = { 0 };
     p.algo = 4; p.feedback = 2;
-    p.op[0] = (OperatorParams){ 1, 4, 18, 25, 10, 4, 9 };
-    p.op[1] = (OperatorParams){ 1, 4, 6, 22, 8, 3, 8 };
-    p.op[2] = (OperatorParams){ 1, 4, 22, 25, 10, 4, 9 };
-    p.op[3] = (OperatorParams){ 1, 4, 8, 22, 8, 3, 8 };
+    p.op[0] = mk_op(1, 4, 18, 25, 10, 4, 9);
+    p.op[1] = mk_op(1, 4, 6, 22, 8, 3, 8);
+    p.op[2] = mk_op(1, 4, 22, 25, 10, 4, 9);
+    p.op[3] = mk_op(1, 4, 8, 22, 8, 3, 8);
     return p;
 }
 static PatchParams preset_lead(void) {
     PatchParams p = { 0 };
     p.algo = 2; p.feedback = 4;
-    p.op[0] = (OperatorParams){ 3, 4, 26, 31, 12, 5, 9 };
-    p.op[1] = (OperatorParams){ 1, 4, 20, 31, 10, 4, 8 };
-    p.op[2] = (OperatorParams){ 1, 4, 14, 31, 10, 4, 8 };
-    p.op[3] = (OperatorParams){ 1, 4, 6, 31, 8, 3, 8 };
+    p.op[0] = mk_op(3, 4, 26, 31, 12, 5, 9);
+    p.op[1] = mk_op(1, 4, 20, 31, 10, 4, 8);
+    p.op[2] = mk_op(1, 4, 14, 31, 10, 4, 8);
+    p.op[3] = mk_op(1, 4, 6, 31, 8, 3, 8);
     return p;
 }
 
@@ -182,18 +272,25 @@ static const int LOGICAL_OP_REG_OFFSET[4] = { 0, 8, 4, 12 };
 
 static void apply_patch_to_channel(Ym2612Chip *chip, int port, int chan, const PatchParams *p) {
     int op;
+    int any_solo = 0;
+    for (op = 0; op < 4; op++) if (p->op[op].solo) any_solo = 1;
+
     ym2612_chip_write(chip, port, (uint8_t)(0xB0 + chan), (uint8_t)((p->algo & 7) | ((p->feedback & 7) << 3)));
     for (op = 0; op < 4; op++) {
         int off = LOGICAL_OP_REG_OFFSET[op];
         const OperatorParams *o = &p->op[op];
         uint8_t d1r_byte = (uint8_t)((o->d1r & 0x1F) | (p->am_enable ? 0x80 : 0x00));
+        uint8_t ssg_byte = (uint8_t)((o->ssg_enable ? 0x08 : 0x00) | (o->ssg_mode & 0x07));
+        int silenced = any_solo ? !o->solo : o->mute;
+        uint8_t effective_tl = silenced ? 0x7F : (uint8_t)(o->tl & 0x7F);
+
         ym2612_chip_write(chip, port, (uint8_t)(0x30 + off + chan), (uint8_t)(((o->dt & 7) << 4) | (o->mul & 0x0F)));
-        ym2612_chip_write(chip, port, (uint8_t)(0x40 + off + chan), (uint8_t)(o->tl & 0x7F));
+        ym2612_chip_write(chip, port, (uint8_t)(0x40 + off + chan), effective_tl);
         ym2612_chip_write(chip, port, (uint8_t)(0x50 + off + chan), (uint8_t)(o->ar & 0x1F));  /* KS=0 */
         ym2612_chip_write(chip, port, (uint8_t)(0x60 + off + chan), d1r_byte);
-        ym2612_chip_write(chip, port, (uint8_t)(0x70 + off + chan), 0x00);                      /* D2R=0 */
+        ym2612_chip_write(chip, port, (uint8_t)(0x70 + off + chan), (uint8_t)(o->d2r & 0x1F));
         ym2612_chip_write(chip, port, (uint8_t)(0x80 + off + chan), (uint8_t)(((o->sl & 0x0F) << 4) | (o->rr & 0x0F)));
-        ym2612_chip_write(chip, port, (uint8_t)(0x90 + off + chan), 0x00);                      /* SSG-EG off */
+        ym2612_chip_write(chip, port, (uint8_t)(0x90 + off + chan), ssg_byte);
     }
     /* pan: both L+R on, plus this patch's AMS/PMS */
     ym2612_chip_write(chip, port, (uint8_t)(0xB4 + chan),
@@ -228,6 +325,10 @@ static void note_on(Ym2612Chip *chip, int note_id, double freq_hz) {
             chip_key(chip, i, 0x0F);
             g_voices[i].active = 1;
             g_voices[i].note_id = note_id;
+            if (i < 3 && g_psg_level > 0) {
+                psg_set_tone(&g_psg, i, freq_hz);
+                psg_set_volume(&g_psg, i, (uint8_t)(15 - g_psg_level));
+            }
             return;
         }
     }
@@ -240,6 +341,16 @@ static void note_off(Ym2612Chip *chip, int note_id) {
         if (g_voices[i].active && g_voices[i].note_id == note_id) {
             chip_key(chip, i, 0x00);
             g_voices[i].active = 0;
+            if (i < 3) psg_set_volume(&g_psg, i, 15);
+        }
+    }
+}
+
+static void refresh_psg_level(void) {
+    int i;
+    for (i = 0; i < 3; i++) {
+        if (g_voices[i].active) {
+            psg_set_volume(&g_psg, i, g_psg_level > 0 ? (uint8_t)(15 - g_psg_level) : 15);
         }
     }
 }
@@ -272,7 +383,7 @@ static const PianoKeyDef PIANO_KEYS[13] = {
 };
 
 #define PIANO_X 140
-#define PIANO_Y 555
+#define PIANO_Y 650
 #define WHITE_KEY_W 60
 #define WHITE_KEY_H 140
 #define BLACK_KEY_W 36
@@ -471,7 +582,7 @@ static void compute_envelope_graph(const OperatorParams *p, float *out) {
     ym2612_operator_set_tl(&op, (uint8_t)p->tl);
     ym2612_operator_set_ar_ksr(&op, (uint8_t)p->ar);
     ym2612_operator_set_d1r(&op, (uint8_t)p->d1r);
-    ym2612_operator_set_d2r(&op, 0);
+    ym2612_operator_set_d2r(&op, (uint8_t)p->d2r);
     ym2612_operator_set_sl_rr(&op, (uint8_t)(((p->sl & 0x0F) << 4) | (p->rr & 0x0F)));
     ym2612_operator_set_freq(&op, 700, 4);
     ym2612_operator_key_on(&op);
@@ -504,11 +615,19 @@ static void draw_envelope_graph(Rectangle area, const OperatorParams *p) {
     }
 }
 
+/* ---- MIDI glue: thin wrappers binding the callbacks midi_input.h expects
+ * to the app's own note_on/note_off (which take an explicit chip pointer). */
+
+static void midi_note_on(int note_id, double freq_hz) { note_on(&g_chip, note_id, freq_hz); }
+static void midi_note_off(int note_id) { note_off(&g_chip, note_id); }
+
 /* ---- Main ---- */
 
 int main(void) {
     PatchParams patch = default_patch();
     AudioStream stream;
+    const char *midi_status;
+    int record_index = 0;
     int lfo_enabled = 0;
     int lfo_rate = 3;
     int op;
@@ -518,12 +637,18 @@ int main(void) {
 
     InitAudioDevice();
     ym2612_chip_init(&g_chip);
+    psg_reset(&g_psg);
     stream = LoadAudioStream(OUTPUT_SAMPLE_RATE, 16, 2);
     SetAudioStreamCallback(stream, AudioStreamCallback);
     PlayAudioStream(stream);
 
+    g_record_buffer = (int16_t *)malloc(RECORD_MAX_FRAMES * 2 * sizeof(int16_t));
+
+    midi_status = midi_input_init(midi_note_on, midi_note_off);
+
     apply_patch_all(&g_chip, &patch);
     apply_lfo(&g_chip, lfo_enabled, lfo_rate);
+    apply_noise();
 
     while (!WindowShouldClose()) {
         int patch_changed = 0;
@@ -564,22 +689,31 @@ int main(void) {
         }
         DrawText("PRESETS", 660, 165, 11, (Color){ 160, 160, 170, 255 });
 
-        /* Operator panels */
+        /* Operator panels: 8 sliders (30px spacing) + SSG-EG row + mute/solo row + envelope graph */
         for (op = 0; op < 4; op++) {
             float px = 40.0f + op * 260.0f;
             float py = 250.0f;
             char title[8];
+            OperatorParams *o = &patch.op[op];
             snprintf(title, sizeof title, "OP%d", op + 1);
             DrawText(title, (int)px, (int)(py - 25), 18, (Color){ 90, 170, 250, 255 });
 
-            patch_changed |= Slider((Rectangle){ px, py + 10, 200, 12 }, "MUL (harmonic ratio)", &patch.op[op].mul, 0, 15);
-            patch_changed |= Slider((Rectangle){ px, py + 50, 200, 12 }, "TL (0=loudest)", &patch.op[op].tl, 0, 127);
-            patch_changed |= Slider((Rectangle){ px, py + 90, 200, 12 }, "AR (attack speed)", &patch.op[op].ar, 0, 31);
-            patch_changed |= Slider((Rectangle){ px, py + 130, 200, 12 }, "D1R (decay speed)", &patch.op[op].d1r, 0, 31);
-            patch_changed |= Slider((Rectangle){ px, py + 170, 200, 12 }, "SL (sustain level)", &patch.op[op].sl, 0, 15);
-            patch_changed |= Slider((Rectangle){ px, py + 210, 200, 12 }, "RR (release speed)", &patch.op[op].rr, 0, 15);
+            patch_changed |= Slider((Rectangle){ px, py + 10, 200, 12 }, "MUL (harmonic ratio)", &o->mul, 0, 15);
+            patch_changed |= Slider((Rectangle){ px, py + 40, 200, 12 }, "DT (detune)", &o->dt, 0, 7);
+            patch_changed |= Slider((Rectangle){ px, py + 70, 200, 12 }, "TL (0=loudest)", &o->tl, 0, 127);
+            patch_changed |= Slider((Rectangle){ px, py + 100, 200, 12 }, "AR (attack speed)", &o->ar, 0, 31);
+            patch_changed |= Slider((Rectangle){ px, py + 130, 200, 12 }, "D1R (decay speed)", &o->d1r, 0, 31);
+            patch_changed |= Slider((Rectangle){ px, py + 160, 200, 12 }, "D2R (sustain decay)", &o->d2r, 0, 31);
+            patch_changed |= Slider((Rectangle){ px, py + 190, 200, 12 }, "SL (sustain level)", &o->sl, 0, 15);
+            patch_changed |= Slider((Rectangle){ px, py + 220, 200, 12 }, "RR (release speed)", &o->rr, 0, 15);
 
-            draw_envelope_graph((Rectangle){ px, py + 235, 200, 50 }, &patch.op[op]);
+            patch_changed |= Toggle((Rectangle){ px, py + 245, 60, 24 }, "SSG", &o->ssg_enable);
+            patch_changed |= Slider((Rectangle){ px + 90, py + 251, 110, 12 }, "SSG MODE", &o->ssg_mode, 0, 7);
+
+            patch_changed |= Toggle((Rectangle){ px, py + 282, 55, 22 }, "MUTE", &o->mute);
+            patch_changed |= Toggle((Rectangle){ px + 65, py + 282, 55, 22 }, "SOLO", &o->solo);
+
+            draw_envelope_graph((Rectangle){ px, py + 313, 200, 50 }, o);
         }
 
         if (patch_changed) apply_patch_all(&g_chip, &patch);
@@ -594,14 +728,62 @@ int main(void) {
             DrawText(TextFormat("Octave %+d", g_octave), 40, PIANO_Y + 86, 14, (Color){ 200, 200, 210, 255 });
         }
 
+        /* PSG panel: to the right of the piano, same row */
+        {
+            float qx = 700.0f, qy = (float)PIANO_Y;
+            int psg_changed = 0;
+            DrawText("PSG (SN76489)", (int)qx, (int)(qy - 22), 15, (Color){ 90, 170, 250, 255 });
+            psg_changed |= Slider((Rectangle){ qx, qy + 10, 160, 12 }, "PSG LEVEL (layers under FM)", &g_psg_level, 0, 15);
+            if (psg_changed) refresh_psg_level();
+
+            DrawText("NOISE", (int)qx, (int)(qy + 45), 13, (Color){ 160, 160, 170, 255 });
+            {
+                int noise_changed = 0;
+                noise_changed |= Toggle((Rectangle){ qx, qy + 62, 70, 24 }, g_noise_on ? "ON" : "OFF", &g_noise_on);
+                noise_changed |= Toggle((Rectangle){ qx + 80, qy + 62, 90, 24 }, g_noise_white ? "WHITE" : "PERIODIC", &g_noise_white);
+                noise_changed |= Slider((Rectangle){ qx, qy + 105, 160, 12 }, "NOISE VOLUME", &g_noise_volume, 0, 15);
+                noise_changed |= Slider((Rectangle){ qx, qy + 135, 160, 12 }, "NOISE RATE", &g_noise_rate, 0, 3);
+                if (noise_changed) apply_noise();
+            }
+        }
+
         BeginDrawing();
         ClearBackground((Color){ 24, 24, 28, 255 });
         DrawText("Genesis FM Synth", 40, 15, 24, RAYWHITE);
+        DrawText(midi_status, 700, 22, 14, (Color){ 160, 160, 170, 255 });
+        {
+            Rectangle rec_rect = { 950, 15, 90, 28 };
+            Vector2 mouse = GetMousePosition();
+            int hot = CheckCollisionPointRec(mouse, rec_rect);
+            Color col = g_recording ? (Color){ 220, 60, 60, 255 } : (hot ? (Color){ 65, 65, 78, 255 } : (Color){ 42, 42, 50, 255 });
+            DrawRectangleRec(rec_rect, col);
+            DrawRectangleLinesEx(rec_rect, 1, (Color){ 80, 80, 90, 255 });
+            DrawText(g_recording ? "REC..." : "* REC", (int)rec_rect.x + 14, (int)rec_rect.y + 7, 13, RAYWHITE);
+            if (hot && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                if (g_recording) {
+                    g_recording = 0;
+                    if (g_record_frames > 0) {
+                        Wave w = { 0 };
+                        w.frameCount = (unsigned int)g_record_frames;
+                        w.sampleRate = OUTPUT_SAMPLE_RATE;
+                        w.sampleSize = 16;
+                        w.channels = 2;
+                        w.data = g_record_buffer;
+                        ExportWave(w, TextFormat("genesis_synth_recording_%d.wav", record_index++));
+                    }
+                } else {
+                    g_recording = 1;
+                    g_record_frames = 0;
+                }
+            }
+        }
         draw_piano();
         DrawText("Play: mouse, or Z S X D C V G B H N J M , -- octave: [ ]", PIANO_X, PIANO_Y + WHITE_KEY_H + 15, 14, (Color){ 160, 160, 170, 255 });
         EndDrawing();
     }
 
+    midi_input_shutdown();
+    free(g_record_buffer);
     UnloadAudioStream(stream);
     CloseAudioDevice();
     CloseWindow();

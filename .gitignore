@@ -3,6 +3,7 @@ build/
 *.obj
 *.exe
 *.pdb
+genesis_synth_recording_*.wav
 
 .claude/
 .vs/
