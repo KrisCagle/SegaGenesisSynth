@@ -28,12 +28,25 @@
 
 #define OUTPUT_SAMPLE_RATE 32000
 
+/* The DS's ARM9 (ARM946E-S) has no hardware FPU, so `double` math in the
+ * per-sample audio path gets emulated in slow software float -- fine on PC,
+ * but on real hardware it was eating enough of the per-sample budget to
+ * cause audible crackle (buffer underrun). The tick-rate ratios themselves
+ * are computed once at compile time from a constant double expression (the
+ * compiler folds this into a plain integer, no runtime float cost); only
+ * the per-sample accumulation is fixed-point from here on, same "no floats
+ * in the real-time path" rule chip_types.h already applies to synth-core
+ * itself, just extended to this platform's glue code too. */
+#define TICK_FX_BITS 16
+
 static Ym2612Chip g_chip;
 static Psg g_psg;
-static double g_fm_tick_accum = 0.0;
-static double g_psg_tick_accum = 0.0;
-static const double FM_TICKS_PER_SAMPLE = YM2612_SAMPLE_HZ / OUTPUT_SAMPLE_RATE;
-static const double PSG_TICKS_PER_SAMPLE = PSG_TICK_HZ / OUTPUT_SAMPLE_RATE;
+static uint32_t g_fm_tick_accum_fx = 0;
+static uint32_t g_psg_tick_accum_fx = 0;
+static const uint32_t FM_TICKS_PER_SAMPLE_FX =
+    (uint32_t)(YM2612_SAMPLE_HZ * (double)(1u << TICK_FX_BITS) / OUTPUT_SAMPLE_RATE + 0.5);
+static const uint32_t PSG_TICKS_PER_SAMPLE_FX =
+    (uint32_t)(PSG_TICK_HZ * (double)(1u << TICK_FX_BITS) / OUTPUT_SAMPLE_RATE + 0.5);
 
 /* ---- Register-write helpers (same real protocol as every other port) ---- */
 
@@ -107,10 +120,10 @@ static mm_word on_stream_request(mm_word length, mm_addr dest, mm_stream_formats
         int32_t left_sum = 0, right_sum = 0, psg_sum = 0;
         int fm_n, psg_n, k;
 
-        g_fm_tick_accum += FM_TICKS_PER_SAMPLE;
-        fm_n = (int)g_fm_tick_accum;
+        g_fm_tick_accum_fx += FM_TICKS_PER_SAMPLE_FX;
+        fm_n = (int)(g_fm_tick_accum_fx >> TICK_FX_BITS);
         if (fm_n < 1) fm_n = 1;
-        g_fm_tick_accum -= fm_n;
+        g_fm_tick_accum_fx -= (uint32_t)fm_n << TICK_FX_BITS;
         for (k = 0; k < fm_n; k++) {
             sample_t l, r;
             ym2612_chip_clock(&g_chip, &l, &r);
@@ -118,10 +131,10 @@ static mm_word on_stream_request(mm_word length, mm_addr dest, mm_stream_formats
             right_sum += r;
         }
 
-        g_psg_tick_accum += PSG_TICKS_PER_SAMPLE;
-        psg_n = (int)g_psg_tick_accum;
+        g_psg_tick_accum_fx += PSG_TICKS_PER_SAMPLE_FX;
+        psg_n = (int)(g_psg_tick_accum_fx >> TICK_FX_BITS);
         if (psg_n < 1) psg_n = 1;
-        g_psg_tick_accum -= psg_n;
+        g_psg_tick_accum_fx -= (uint32_t)psg_n << TICK_FX_BITS;
         for (k = 0; k < psg_n; k++) {
             psg_sum += psg_clock(&g_psg);
         }
