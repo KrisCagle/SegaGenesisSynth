@@ -5,5 +5,10 @@ build/
 *.pdb
 genesis_synth_recording_*.wav
 
+nds/build/
+*.elf
+*.nds
+*.map
+
 .claude/
 .vs/
