@@ -341,7 +341,7 @@ static void draw_piano(void) {
 
 /* ---- Minimal UI widgets ---- */
 
-static int Slider(Rectangle bounds, const char *label, const char *hint, int *value, int min_v, int max_v) {
+static int Slider(Rectangle bounds, const char *label, int *value, int min_v, int max_v) {
     Vector2 mouse = GetMousePosition();
     int changed = 0;
     int hot = CheckCollisionPointRec(mouse, bounds);
@@ -367,9 +367,6 @@ static int Slider(Rectangle bounds, const char *label, const char *hint, int *va
     DrawText(label, (int)bounds.x, (int)bounds.y - 15, 12, RAYWHITE);
     snprintf(valtext, sizeof valtext, "%d", *value);
     DrawText(valtext, (int)(bounds.x + bounds.width + 8), (int)(bounds.y + 2), 12, RAYWHITE);
-    if (hot && hint) {
-        DrawText(hint, (int)mouse.x + 14, (int)mouse.y + 14, 11, (Color){ 220, 220, 60, 255 });
-    }
     return changed;
 }
 
@@ -546,15 +543,15 @@ int main(void) {
                 patch_changed = 1;
             }
         }
-        patch_changed |= Slider((Rectangle){ 40, 145, 180, 12 }, "FEEDBACK", "Self-modulation depth for OP1 (0=off)", &patch.feedback, 0, 7);
+        patch_changed |= Slider((Rectangle){ 40, 145, 180, 12 }, "FEEDBACK", &patch.feedback, 0, 7);
 
         draw_algo_diagram((Rectangle){ 420, 55, 220, 160 }, patch.algo);
 
         /* LFO controls */
         lfo_changed |= Toggle((Rectangle){ 660, 55, 70, 28 }, "LFO", &lfo_enabled);
-        lfo_changed |= Slider((Rectangle){ 660, 105, 130, 12 }, "LFO RATE", "How fast the LFO cycles", &lfo_rate, 0, 7);
-        patch_changed |= Slider((Rectangle){ 660, 145, 130, 12 }, "PMS (vibrato)", "How much the LFO wobbles pitch", &patch.pms, 0, 7);
-        patch_changed |= Slider((Rectangle){ 830, 145, 130, 12 }, "AMS (tremolo)", "How much the LFO wobbles volume", &patch.ams, 0, 3);
+        lfo_changed |= Slider((Rectangle){ 660, 105, 130, 12 }, "LFO RATE", &lfo_rate, 0, 7);
+        patch_changed |= Slider((Rectangle){ 660, 145, 130, 12 }, "PMS (vibrato)", &patch.pms, 0, 7);
+        patch_changed |= Slider((Rectangle){ 830, 145, 130, 12 }, "AMS (tremolo)", &patch.ams, 0, 3);
         patch_changed |= Toggle((Rectangle){ 830, 55, 130, 28 }, "AM ENABLE", &patch.am_enable);
 
         /* Presets */
@@ -575,12 +572,12 @@ int main(void) {
             snprintf(title, sizeof title, "OP%d", op + 1);
             DrawText(title, (int)px, (int)(py - 25), 18, (Color){ 90, 170, 250, 255 });
 
-            patch_changed |= Slider((Rectangle){ px, py + 10, 200, 12 }, "MUL (harmonic ratio)", "Multiplies this operator's frequency", &patch.op[op].mul, 0, 15);
-            patch_changed |= Slider((Rectangle){ px, py + 50, 200, 12 }, "TL (0=loudest)", "Output level / modulation depth", &patch.op[op].tl, 0, 127);
-            patch_changed |= Slider((Rectangle){ px, py + 90, 200, 12 }, "AR (attack speed)", "How fast it reaches full volume", &patch.op[op].ar, 0, 31);
-            patch_changed |= Slider((Rectangle){ px, py + 130, 200, 12 }, "D1R (decay speed)", "How fast it drops to the sustain level", &patch.op[op].d1r, 0, 31);
-            patch_changed |= Slider((Rectangle){ px, py + 170, 200, 12 }, "SL (sustain level)", "The level it holds at while a key is down", &patch.op[op].sl, 0, 15);
-            patch_changed |= Slider((Rectangle){ px, py + 210, 200, 12 }, "RR (release speed)", "How fast it fades after key-off", &patch.op[op].rr, 0, 15);
+            patch_changed |= Slider((Rectangle){ px, py + 10, 200, 12 }, "MUL (harmonic ratio)", &patch.op[op].mul, 0, 15);
+            patch_changed |= Slider((Rectangle){ px, py + 50, 200, 12 }, "TL (0=loudest)", &patch.op[op].tl, 0, 127);
+            patch_changed |= Slider((Rectangle){ px, py + 90, 200, 12 }, "AR (attack speed)", &patch.op[op].ar, 0, 31);
+            patch_changed |= Slider((Rectangle){ px, py + 130, 200, 12 }, "D1R (decay speed)", &patch.op[op].d1r, 0, 31);
+            patch_changed |= Slider((Rectangle){ px, py + 170, 200, 12 }, "SL (sustain level)", &patch.op[op].sl, 0, 15);
+            patch_changed |= Slider((Rectangle){ px, py + 210, 200, 12 }, "RR (release speed)", &patch.op[op].rr, 0, 15);
 
             draw_envelope_graph((Rectangle){ px, py + 235, 200, 50 }, &patch.op[op]);
         }
@@ -600,7 +597,6 @@ int main(void) {
         BeginDrawing();
         ClearBackground((Color){ 24, 24, 28, 255 });
         DrawText("Genesis FM Synth", 40, 15, 24, RAYWHITE);
-        DrawText("Algorithm (how the 4 operators connect -- not a preset)", 40, 40, 13, (Color){ 160, 160, 170, 255 });
         draw_piano();
         DrawText("Play: mouse, or Z S X D C V G B H N J M , -- octave: [ ]", PIANO_X, PIANO_Y + WHITE_KEY_H + 15, 14, (Color){ 160, 160, 170, 255 });
         EndDrawing();
