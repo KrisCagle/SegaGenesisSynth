@@ -1,0 +1,201 @@
+#include "Parameters.h"
+
+namespace genisys::params
+{
+namespace
+{
+    constexpr int kVersion = 1; // ParameterID version hint (needed by AU); bump only for new IDs
+
+    using Labeller = std::function<juce::String (int)>;
+
+    std::unique_ptr<juce::AudioParameterInt> intParam (const juce::String& id, const juce::String& name,
+                                                       int lo, int hi, int def, Labeller label = {})
+    {
+        auto attributes = juce::AudioParameterIntAttributes();
+        if (label)
+            attributes = attributes.withStringFromValueFunction ([label] (int v, int) { return label (v); });
+        return std::make_unique<juce::AudioParameterInt> (juce::ParameterID { id, kVersion }, name, lo, hi, def, attributes);
+    }
+
+    std::unique_ptr<juce::AudioParameterBool> boolParam (const juce::String& id, const juce::String& name, bool def)
+    {
+        return std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id, kVersion }, name, def);
+    }
+
+    // Shows register values in the units a musician thinks in, while the
+    // stored value stays the exact hardware register value.
+    juce::String multiplierLabel (int v) { return v == 0 ? "x0.5" : "x" + juce::String (v); }
+    juce::String detuneLabel (int v)
+    {
+        static const char* names[] = { "0", "+1", "+2", "+3", "0", "-1", "-2", "-3" };
+        return names[v & 7];
+    }
+    juce::String levelLabel (int v) { return v == 0 ? "0 dB" : juce::String (-0.75f * (float) v, 2) + " dB"; }
+    juce::String sustainLabel (int v) { return v == 15 ? "-93 dB" : juce::String (-3 * v) + " dB"; }
+    juce::String lfoRateLabel (int v)
+    {
+        static const char* hz[] = { "3.98 Hz", "5.56 Hz", "6.02 Hz", "6.37 Hz", "6.88 Hz", "9.63 Hz", "48.1 Hz", "72.2 Hz" };
+        return hz[v & 7];
+    }
+    juce::String amsLabel (int v)
+    {
+        static const char* db[] = { "Off", "1.4 dB", "5.9 dB", "11.8 dB" };
+        return db[v & 3];
+    }
+    juce::String pmsLabel (int v)
+    {
+        static const char* cents[] = { "Off", "3.4 cents", "6.7 cents", "10 cents", "14 cents", "20 cents", "40 cents", "80 cents" };
+        return cents[v & 7];
+    }
+    juce::String percentLabel (int v) { return juce::String (v) + "%"; }
+
+    std::atomic<float>* raw (juce::AudioProcessorValueTreeState& state, const juce::String& id)
+    {
+        auto* value = state.getRawParameterValue (id);
+        jassert (value != nullptr); // an ID here doesn't match createLayout()
+        return value;
+    }
+
+    int asInt (const std::atomic<float>* value) { return (int) std::lround (value->load (std::memory_order_relaxed)); }
+}
+
+juce::String opId (int op, const char* field)
+{
+    return "op" + juce::String (op + 1) + "_" + field;
+}
+
+juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
+{
+    const GenisysPatch def = genisys_default_patch();
+    juce::AudioProcessorValueTreeState::ParameterLayout layout;
+
+    layout.add (intParam ("algorithm", "Algorithm", 0, 7, def.algorithm));
+    layout.add (intParam ("feedback", "Feedback", 0, 7, def.feedback));
+    layout.add (boolParam ("lfo_enable", "LFO On", def.lfo_enable != 0));
+    layout.add (intParam ("lfo_rate", "LFO Rate", 0, 7, def.lfo_rate, lfoRateLabel));
+    layout.add (intParam ("ams", "Tremolo Depth (AMS)", 0, 3, def.ams, amsLabel));
+    layout.add (intParam ("pms", "Vibrato Depth (PMS)", 0, 7, def.pms, pmsLabel));
+    layout.add (intParam ("velocity_sens", "Velocity Sensitivity", 0, 100, def.velocity_sens, percentLabel));
+    layout.add (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "master_gain", kVersion }, "Master Volume",
+        juce::NormalisableRange<float> (-24.0f, 12.0f, 0.1f), 0.0f,
+        juce::AudioParameterFloatAttributes().withLabel ("dB")));
+
+    for (int op = 0; op < 4; ++op)
+    {
+        const auto& o = def.op[op];
+        const auto name = [op] (const char* what) { return "OP" + juce::String (op + 1) + " " + what; };
+
+        layout.add (intParam (opId (op, "mul"), name ("Multiplier (MUL)"), 0, 15, o.mul, multiplierLabel));
+        layout.add (intParam (opId (op, "dt"), name ("Detune (DT)"), 0, 7, o.dt, detuneLabel));
+        layout.add (intParam (opId (op, "tl"), name ("Level (TL)"), 0, 127, o.tl, levelLabel));
+        layout.add (intParam (opId (op, "ar"), name ("Attack (AR)"), 0, 31, o.ar));
+        layout.add (intParam (opId (op, "d1r"), name ("Decay 1 (D1R)"), 0, 31, o.d1r));
+        layout.add (intParam (opId (op, "d2r"), name ("Decay 2 (D2R)"), 0, 31, o.d2r));
+        layout.add (intParam (opId (op, "sl"), name ("Sustain Level (SL)"), 0, 15, o.sl, sustainLabel));
+        layout.add (intParam (opId (op, "rr"), name ("Release (RR)"), 0, 15, o.rr));
+        layout.add (intParam (opId (op, "ks"), name ("Key Scale (KS)"), 0, 3, o.ks));
+        layout.add (boolParam (opId (op, "am"), name ("Tremolo On (AM)"), o.am != 0));
+        layout.add (boolParam (opId (op, "ssg_enable"), name ("SSG-EG On"), o.ssg_enable != 0));
+        layout.add (intParam (opId (op, "ssg_mode"), name ("SSG-EG Shape"), 0, 7, o.ssg_mode));
+    }
+
+    layout.add (intParam ("psg_level", "PSG Level", 0, 15, 0));
+    layout.add (boolParam ("noise_on", "Noise On", false));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (
+        juce::ParameterID { "noise_white", kVersion }, "Noise Type", juce::StringArray { "Periodic", "White" }, 1));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (
+        juce::ParameterID { "noise_rate", kVersion }, "Noise Rate",
+        juce::StringArray { "High", "Medium", "Low", "Follow PSG Tone 3" }, 1));
+    layout.add (intParam ("noise_volume", "Noise Volume", 0, 15, 10));
+
+    return layout;
+}
+
+Snapshot::Snapshot (juce::AudioProcessorValueTreeState& state)
+    : algorithm (raw (state, "algorithm")), feedback (raw (state, "feedback")),
+      lfoEnable (raw (state, "lfo_enable")), lfoRate (raw (state, "lfo_rate")),
+      ams (raw (state, "ams")), pms (raw (state, "pms")),
+      velocitySens (raw (state, "velocity_sens")), masterGain (raw (state, "master_gain")),
+      psgLevel (raw (state, "psg_level")), noiseOn (raw (state, "noise_on")),
+      noiseWhite (raw (state, "noise_white")), noiseRate (raw (state, "noise_rate")),
+      noiseVolume (raw (state, "noise_volume"))
+{
+    for (int op = 0; op < 4; ++op)
+    {
+        auto& p = ops[(size_t) op];
+        p.mul = raw (state, opId (op, "mul"));
+        p.dt = raw (state, opId (op, "dt"));
+        p.tl = raw (state, opId (op, "tl"));
+        p.ar = raw (state, opId (op, "ar"));
+        p.d1r = raw (state, opId (op, "d1r"));
+        p.d2r = raw (state, opId (op, "d2r"));
+        p.sl = raw (state, opId (op, "sl"));
+        p.rr = raw (state, opId (op, "rr"));
+        p.ks = raw (state, opId (op, "ks"));
+        p.am = raw (state, opId (op, "am"));
+        p.ssgEnable = raw (state, opId (op, "ssg_enable"));
+        p.ssgMode = raw (state, opId (op, "ssg_mode"));
+    }
+}
+
+GenisysPatch Snapshot::readPatch() const
+{
+    GenisysPatch patch {};
+    patch.algorithm = asInt (algorithm);
+    patch.feedback = asInt (feedback);
+    patch.lfo_enable = asInt (lfoEnable);
+    patch.lfo_rate = asInt (lfoRate);
+    patch.ams = asInt (ams);
+    patch.pms = asInt (pms);
+    patch.velocity_sens = asInt (velocitySens);
+
+    for (size_t op = 0; op < 4; ++op)
+    {
+        const auto& p = ops[op];
+        auto& o = patch.op[op];
+        o.mul = asInt (p.mul); o.dt = asInt (p.dt); o.tl = asInt (p.tl);
+        o.ar = asInt (p.ar); o.d1r = asInt (p.d1r); o.d2r = asInt (p.d2r);
+        o.sl = asInt (p.sl); o.rr = asInt (p.rr); o.ks = asInt (p.ks);
+        o.am = asInt (p.am); o.ssg_enable = asInt (p.ssgEnable); o.ssg_mode = asInt (p.ssgMode);
+    }
+    return patch;
+}
+
+GenisysPsgSettings Snapshot::readPsg() const
+{
+    GenisysPsgSettings psg {};
+    psg.level = asInt (psgLevel);
+    psg.noise_on = asInt (noiseOn);
+    psg.noise_white = asInt (noiseWhite);
+    psg.noise_rate = asInt (noiseRate);
+    psg.noise_volume = asInt (noiseVolume);
+    return psg;
+}
+
+void applyPatch (juce::AudioProcessorValueTreeState& state, const GenisysPatch& patch)
+{
+    const auto set = [&state] (const juce::String& id, int value)
+    {
+        if (auto* param = state.getParameter (id))
+            param->setValueNotifyingHost (param->convertTo0to1 ((float) value));
+    };
+
+    set ("algorithm", patch.algorithm);
+    set ("feedback", patch.feedback);
+    set ("lfo_enable", patch.lfo_enable);
+    set ("lfo_rate", patch.lfo_rate);
+    set ("ams", patch.ams);
+    set ("pms", patch.pms);
+    set ("velocity_sens", patch.velocity_sens);
+
+    for (int op = 0; op < 4; ++op)
+    {
+        const auto& o = patch.op[op];
+        set (opId (op, "mul"), o.mul); set (opId (op, "dt"), o.dt); set (opId (op, "tl"), o.tl);
+        set (opId (op, "ar"), o.ar); set (opId (op, "d1r"), o.d1r); set (opId (op, "d2r"), o.d2r);
+        set (opId (op, "sl"), o.sl); set (opId (op, "rr"), o.rr); set (opId (op, "ks"), o.ks);
+        set (opId (op, "am"), o.am); set (opId (op, "ssg_enable"), o.ssg_enable); set (opId (op, "ssg_mode"), o.ssg_mode);
+    }
+}
+}
