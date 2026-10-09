@@ -26,6 +26,8 @@ GenisysProcessor::GenisysProcessor()
       params (state)
 {
     genisys_engine_init (engine.get(), 44100.0);
+    for (auto& channel : playedNote)
+        channel.fill (-1);
     scratchLeft.resize (kScratchFrames);
     scratchRight.resize (kScratchFrames);
 }
@@ -39,6 +41,7 @@ void GenisysProcessor::prepareToPlay (double sampleRate, int)
     genisys_engine_init (engine.get(), sampleRate);
     forceParameterSync = true;
 
+    editorMidi.reset (sampleRate);
     masterGain.reset (sampleRate, 0.02);
     masterGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (params.masterGainDb()));
 }
@@ -96,12 +99,54 @@ void GenisysProcessor::handleMidi (const juce::MidiMessage& message)
         return;
     }
 
+    const auto channel = (size_t) juce::jlimit (0, 15, message.getChannel() - 1);
+    const auto note = (size_t) juce::jlimit (0, 127, message.getNoteNumber());
+
+    if (message.isPitchWheel())
+    {
+        // 14-bit wheel, centre 8192, mapped through the Pitch Bend Range.
+        const double amount = (message.getPitchWheelValue() - 8192) / 8192.0;
+        genisys_engine_pitch_bend (engine.get(), amount * params.bendRange());
+        return;
+    }
+    if (message.isControllerOfType (1)) // mod wheel
+    {
+        genisys_engine_mod_wheel (engine.get(), message.getControllerValue() / 127.0);
+        return;
+    }
+    if (message.isSustainPedalOn() || message.isSustainPedalOff())
+    {
+        genisys_engine_sustain (engine.get(), message.isSustainPedalOn() ? 1 : 0);
+        return;
+    }
+    if (message.isResetAllControllers())
+    {
+        genisys_engine_pitch_bend (engine.get(), 0.0);
+        genisys_engine_mod_wheel (engine.get(), 0.0);
+        genisys_engine_sustain (engine.get(), 0);
+        return;
+    }
+
     if (message.isNoteOn())
-        genisys_engine_note_on (engine.get(), message.getNoteNumber(), message.getVelocity());
+    {
+        const int played = juce::jlimit (0, 127, (int) note + 12 * params.octave());
+        if (playedNote[channel][note] >= 0 && playedNote[channel][note] != played)
+            genisys_engine_note_off (engine.get(), playedNote[channel][note]);
+        playedNote[channel][note] = played;
+        genisys_engine_note_on (engine.get(), played, message.getVelocity());
+    }
     else if (message.isNoteOff())
-        genisys_engine_note_off (engine.get(), message.getNoteNumber());
+    {
+        if (playedNote[channel][note] >= 0)
+            genisys_engine_note_off (engine.get(), playedNote[channel][note]);
+        playedNote[channel][note] = -1;
+    }
     else if (message.isAllNotesOff() || message.isAllSoundOff())
+    {
         genisys_engine_all_notes_off (engine.get());
+        for (auto& ch : playedNote)
+            ch.fill (-1);
+    }
 }
 
 void GenisysProcessor::render (juce::AudioBuffer<float>& buffer, int start, int count)
@@ -143,6 +188,11 @@ void GenisysProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
         buffer.clear (ch, 0, buffer.getNumSamples());
 
     keyboardState.processNextMidiBuffer (midi, 0, buffer.getNumSamples(), true);
+    {
+        juce::MidiBuffer fromEditor;
+        editorMidi.removeNextBlockOfMessages (fromEditor, buffer.getNumSamples());
+        midi.addEvents (fromEditor, 0, buffer.getNumSamples(), 0);
+    }
 
     syncParametersToEngine();
     masterGain.setTargetValue (juce::Decibels::decibelsToGain (params.masterGainDb()));

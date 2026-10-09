@@ -54,6 +54,8 @@ typedef struct {
     int ams;           /* 0-3 tremolo depth */
     int pms;           /* 0-7 vibrato depth */
     int velocity_sens; /* 0-100 %: 0 = every note equally loud (hardware-authentic) */
+    int vibrato_depth; /* 0-100 cents at full mod wheel (software vibrato, as game drivers did) */
+    int vibrato_rate;  /* tenths of a Hz, 10-150 (1.0-15.0 Hz) */
     GenisysOperatorParams op[4]; /* OP1..OP4 */
 } GenisysPatch;
 
@@ -139,6 +141,8 @@ typedef struct {
     int note;      /* MIDI note 0-127 */
     int velocity;  /* 1-127 */
     uint32_t age;  /* engine event counter at the last note-on/off, for oldest-first choices */
+    int sustained; /* key is up but the sustain pedal is holding the note */
+    int last_block, last_fnum; /* frequency registers last written, to skip redundant writes */
 } GenisysVoice;
 
 typedef struct {
@@ -159,6 +163,7 @@ typedef struct {
     GenisysPsgVoice psg_voice[GENISYS_PSG_TONE_CHANNELS];
     int arp_index;
     int arp_counter;
+    int psg_pitch_dirty;
 
     int noise_drum_active;
     int noise_drum_volume_q;   /* in quarter volume steps */
@@ -176,6 +181,15 @@ typedef struct {
     float dc_coeff;            /* DC blocker pole (~5 Hz): the console's output capacitors */
     float dc_x_l, dc_x_r, dc_y_l, dc_y_r;
     int dc_primed;
+
+    /* Expression: pitch bend, mod-wheel vibrato, sustain pedal. Pitch is
+     * re-evaluated at control rate (every ENGINE_CONTROL_PERIOD native
+     * samples, ~1.7 kHz), which keeps bends and vibrato smooth. */
+    double bend_semitones;
+    double mod_wheel;      /* 0-1 */
+    double vibrato_phase;  /* 0-1 */
+    int sustain_pedal;
+    int control_counter;
     float lp_coeff;            /* low-pass pole for console.filter_hz */
     float lp_l, lp_r;
 
@@ -208,6 +222,16 @@ void genisys_engine_note_on(GenisysEngine *e, int note, int velocity);
 void genisys_engine_note_off(GenisysEngine *e, int note);
 void genisys_engine_all_notes_off(GenisysEngine *e);
 
+/* Pitch bend in semitones (front-ends map the MIDI wheel through their own
+ * bend range). Applies to every sounding note, FM and PSG. */
+void genisys_engine_pitch_bend(GenisysEngine *e, double semitones);
+
+/* Mod wheel, 0-1: scales the patch's vibrato depth. */
+void genisys_engine_mod_wheel(GenisysEngine *e, double amount);
+
+/* Sustain pedal: while down, key-ups are held until the pedal is lifted. */
+void genisys_engine_sustain(GenisysEngine *e, int down);
+
 /* Renders `frames` stereo samples. Output is nominally -1..1; the chip's
  * full mix can exceed that (6 loud voices reach about +/-1.5) instead of
  * hard-clipping, so the host or a master gain decides how to handle it. */
@@ -224,6 +248,9 @@ GenisysConsoleSettings genisys_default_console(void);
 
 /* Converts a MIDI note to the chip's (block, fnum) frequency registers. */
 void genisys_note_to_block_fnum(int note, int *block, int *fnum);
+
+/* Same for a fractional pitch in semitones (69.0 = A4 = 440 Hz). */
+void genisys_pitch_to_block_fnum(double pitch, int *block, int *fnum);
 
 /* Which operators reach the output (carriers) for an algorithm, as bits:
  * bit0 = OP1 .. bit3 = OP4. */
