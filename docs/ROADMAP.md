@@ -60,6 +60,18 @@ The core reproduces the YM2612 **chip** accurately, but the Genesis **sound** al
 6. **Channel-3 special mode in the UI.** Each operator gets its own pitch, which is good for detuned "fat" chorus sounds and FM percussion. The core already supports it.
 7. **Mix calibration.** Balance FM against PSG, and the overall level, against hardware recordings. Also give the mix proper headroom so 6 loud voices don't clip (bug #4).
 
+**Status (Phase 3):**
+
+| Item | Status |
+|---|---|
+| 1 | Done: chip model switch (YM2612 / YM3438 / Clean), following Nuked-OPN2's DAC model |
+| 2 | Done: first-order low-pass, adjustable. The default 3.68 kHz is the Mega Amp's Model 1-imitation corner, because no hardware measurement has been published. |
+| 3 | Done in Phase 1 |
+| 4 | Done: DAC drum kit on MIDI channel 10, plus PSG noise hats and cymbals |
+| 5 | Done: PSG layer in Off / Unison / Arpeggio modes, with frame-stepped ADSR and octave shift |
+| 6 | Moved to Phase 4 (voice modes). Channel-3 mode only exists on one channel, so it fits a mono/unison mode rather than 6-voice poly. |
+| 7 | Partly done: headroom is fixed. The FM-to-PSG balance still needs checking against hardware recordings. |
+
 ## 4. Playability: features a musician expects
 
 - **Velocity** controls carrier volume. It's algorithm-aware, so only operators that reach the output get louder. A sensitivity knob set to 0 gives fully authentic behaviour.

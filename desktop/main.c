@@ -433,9 +433,10 @@ int main(void) {
 
     for (i = 0; i < 13; i++) g_key_note[i] = -1;
     g_patch = genisys_default_patch();
-    g_psg_ui.noise_white = 1;
-    g_psg_ui.noise_rate = 1;
-    g_psg_ui.noise_volume = 10;
+    /* The desktop app's single PSG LEVEL slider drives a unison layer. */
+    g_psg_ui = genisys_default_psg();
+    g_psg_ui.mode = GENISYS_PSG_UNISON;
+    g_psg_ui.level = 0;
 
     InitWindow(SCREEN_W, SCREEN_H, "Genisys");
     SetTargetFPS(60);

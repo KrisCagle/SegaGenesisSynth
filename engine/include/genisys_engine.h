@@ -57,16 +57,57 @@ typedef struct {
     GenisysOperatorParams op[4]; /* OP1..OP4 */
 } GenisysPatch;
 
-/* PSG layer (temporary shape, carried over from the desktop app: the
- * PSG's 3 tone channels double FM voices 0-2; a proper PSG instrument
- * arrives in a later phase). */
+/* PSG layer: the SN76489's 3 square-wave channels played alongside FM.
+ * Envelopes step once per 60 Hz video frame, as game sound drivers did,
+ * which gives the PSG its characteristic stepped fades. */
+typedef enum {
+    GENISYS_PSG_OFF = 0,
+    GENISYS_PSG_UNISON = 1,   /* the 3 PSG channels double the most recent FM notes */
+    GENISYS_PSG_ARPEGGIO = 2  /* one PSG channel cycles through all held notes */
+} GenisysPsgMode;
+
 typedef struct {
-    int level;        /* 0-15, 0 = off */
+    int mode;         /* GenisysPsgMode */
+    int level;        /* 0-15 */
+    int octave;       /* -2..+2, relative to the FM note */
+    int attack;       /* 0-15: frames per volume step while rising (0 = instant) */
+    int decay;        /* 0-15: frames per step while falling to sustain (0 = instant) */
+    int sustain;      /* 0-15: held volume (15 = full) */
+    int release;      /* 0-15: frames per step after key-up (0 = instant) */
+    int arp_speed;    /* 1-8: frames per arpeggio step */
+
+    /* Continuous noise "drone" on the noise channel (drum hits override it). */
     int noise_on;     /* 0/1 */
     int noise_white;  /* 0 = periodic, 1 = white */
     int noise_rate;   /* 0-3 */
     int noise_volume; /* 0-15 */
 } GenisysPsgSettings;
+
+/* Drum kit (see genisys_drums.h). While enabled, FM channel 6 belongs to the
+ * DAC, so FM has 5 voices -- the same trade-off Genesis games made. */
+typedef struct {
+    int enabled; /* 0/1 */
+    int level;   /* 0-100 % */
+} GenisysDrumSettings;
+
+#define GENISYS_PSG_TONE_CHANNELS 3
+
+typedef enum {
+    GENISYS_ENV_OFF = 0,
+    GENISYS_ENV_ATTACK,
+    GENISYS_ENV_DECAY,
+    GENISYS_ENV_SUSTAIN,
+    GENISYS_ENV_RELEASE
+} GenisysEnvStage;
+
+typedef struct {
+    int note;            /* MIDI note, -1 = none */
+    int gate;            /* 1 while the key is held */
+    GenisysEnvStage stage;
+    int volume;          /* 0-15 envelope output */
+    int counter;         /* frames until the next envelope step */
+    uint32_t age;
+} GenisysPsgVoice;
 
 /* The console's sound path after the chip. */
 typedef enum {
@@ -105,11 +146,30 @@ typedef struct {
     Psg psg;
     GenisysPatch patch;
     GenisysPsgSettings psg_settings;
+    GenisysDrumSettings drum_settings;
     GenisysVoice voice[GENISYS_NUM_VOICES];
     uint32_t event_counter;
 
     double psg_ticks_per_fm_sample;
     double psg_tick_accum;
+
+    /* 60 Hz "frame" clock for PSG envelopes, arpeggios and noise drums. */
+    double frame_accum;
+
+    GenisysPsgVoice psg_voice[GENISYS_PSG_TONE_CHANNELS];
+    int arp_index;
+    int arp_counter;
+
+    int noise_drum_active;
+    int noise_drum_volume_q;   /* in quarter volume steps */
+    int noise_drum_decay_q;
+
+    /* DAC drum playback (one sample at a time, like the real DAC channel). */
+    const int8_t *dac_sample;
+    int dac_length;
+    double dac_pos;
+    float dac_gain;
+    int dac_last_written;
 
     /* Output stage, run at the chip's native rate before resampling. */
     GenisysConsoleSettings console;
@@ -136,6 +196,12 @@ void genisys_engine_set_sample_rate(GenisysEngine *e, double sample_rate);
 void genisys_engine_set_patch(GenisysEngine *e, const GenisysPatch *patch);
 void genisys_engine_set_psg(GenisysEngine *e, const GenisysPsgSettings *settings);
 void genisys_engine_set_console(GenisysEngine *e, const GenisysConsoleSettings *settings);
+void genisys_engine_set_drums(GenisysEngine *e, const GenisysDrumSettings *settings);
+
+/* Plays a drum from the kit (General MIDI drum note numbers, e.g. 36 kick,
+ * 38 snare, 42 closed hat). Ignored while drums are disabled or for notes
+ * the kit doesn't map. Front-ends route MIDI channel 10 here. */
+void genisys_engine_drum_hit(GenisysEngine *e, int note, int velocity);
 
 /* note: MIDI note number (60 = middle C). velocity: 1-127. */
 void genisys_engine_note_on(GenisysEngine *e, int note, int velocity);
@@ -150,6 +216,8 @@ void genisys_engine_render(GenisysEngine *e, float *out_left, float *out_right, 
 /* ---- Helpers, exposed for front-ends and tests ---- */
 
 GenisysPatch genisys_default_patch(void);
+
+GenisysPsgSettings genisys_default_psg(void);
 
 /* YM2612 (Model 1) with the console filter on: the classic sound. */
 GenisysConsoleSettings genisys_default_console(void);

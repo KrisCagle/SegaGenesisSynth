@@ -65,6 +65,15 @@ namespace
     }
     juce::String percentLabel (int v) { return juce::String (v) + "%"; }
 
+    // PSG envelopes step once per 60 Hz frame (~16.7 ms).
+    juce::String framesPerStepLabel (int v)
+    {
+        return v == 0 ? juce::String ("Instant") : juce::String (v * 1000.0 / 60.0, 0) + " ms/step";
+    }
+    juce::String psgVolumeLabel (int v) { return v == 0 ? juce::String ("Silent") : juce::String (-2 * (15 - v)) + " dB"; }
+    juce::String octaveLabel (int v) { return v == 0 ? juce::String ("0") : (v > 0 ? "+" : "") + juce::String (v) + " oct"; }
+    juce::String arpSpeedLabel (int v) { return juce::String (v * 1000.0 / 60.0, 0) + " ms"; }
+
     std::atomic<float>* raw (juce::AudioProcessorValueTreeState& state, const juce::String& id)
     {
         auto* value = state.getRawParameterValue (id);
@@ -133,14 +142,28 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
                 [] (float v, int) { return v >= 1000.0f ? juce::String (v / 1000.0f, 2) + " kHz" : juce::String ((int) v) + " Hz"; })));
     }
 
-    layout.add (intParam ("psg_level", "PSG Level", 0, 15, 0));
+    const GenisysPsgSettings psg = genisys_default_psg();
+    layout.add (std::make_unique<juce::AudioParameterChoice> (
+        juce::ParameterID { "psg_mode", kVersion }, "PSG Mode",
+        juce::StringArray { "Off", "Unison", "Arpeggio" }, psg.mode));
+    layout.add (intParam ("psg_level", "PSG Level", 0, 15, psg.level, psgVolumeLabel));
+    layout.add (intParam ("psg_octave", "PSG Octave", -2, 2, psg.octave, octaveLabel));
+    layout.add (intParam ("psg_attack", "PSG Attack", 0, 15, psg.attack, framesPerStepLabel));
+    layout.add (intParam ("psg_decay", "PSG Decay", 0, 15, psg.decay, framesPerStepLabel));
+    layout.add (intParam ("psg_sustain", "PSG Sustain", 0, 15, psg.sustain, psgVolumeLabel));
+    layout.add (intParam ("psg_release", "PSG Release", 0, 15, psg.release, framesPerStepLabel));
+    layout.add (intParam ("psg_arp_speed", "PSG Arpeggio Speed", 1, 8, psg.arp_speed, arpSpeedLabel));
+
+    // Drum kit on MIDI channel 10 (General MIDI drum notes).
+    layout.add (boolParam ("drums_on", "Drums On (MIDI ch 10)", false));
+    layout.add (intParam ("drum_level", "Drum Level", 0, 100, 80, percentLabel));
     layout.add (boolParam ("noise_on", "Noise On", false));
     layout.add (std::make_unique<juce::AudioParameterChoice> (
         juce::ParameterID { "noise_white", kVersion }, "Noise Type", juce::StringArray { "Periodic", "White" }, 1));
     layout.add (std::make_unique<juce::AudioParameterChoice> (
         juce::ParameterID { "noise_rate", kVersion }, "Noise Rate",
         juce::StringArray { "High", "Medium", "Low", "Follow PSG Tone 3" }, 1));
-    layout.add (intParam ("noise_volume", "Noise Volume", 0, 15, 10));
+    layout.add (intParam ("noise_volume", "Noise Volume", 0, 15, psg.noise_volume));
 
     return layout;
 }
@@ -154,7 +177,12 @@ Snapshot::Snapshot (juce::AudioProcessorValueTreeState& state)
       noiseWhite (raw (state, "noise_white")), noiseRate (raw (state, "noise_rate")),
       noiseVolume (raw (state, "noise_volume")),
       chipModel (raw (state, "chip_model")), consoleFilter (raw (state, "console_filter")),
-      filterCutoff (raw (state, "filter_cutoff"))
+      filterCutoff (raw (state, "filter_cutoff")),
+      psgMode (raw (state, "psg_mode")), psgOctave (raw (state, "psg_octave")),
+      psgAttack (raw (state, "psg_attack")), psgDecay (raw (state, "psg_decay")),
+      psgSustain (raw (state, "psg_sustain")), psgRelease (raw (state, "psg_release")),
+      psgArpSpeed (raw (state, "psg_arp_speed")), drumsOn (raw (state, "drums_on")),
+      drumLevel (raw (state, "drum_level"))
 {
     for (int op = 0; op < 4; ++op)
     {
@@ -200,12 +228,27 @@ GenisysPatch Snapshot::readPatch() const
 GenisysPsgSettings Snapshot::readPsg() const
 {
     GenisysPsgSettings psg {};
+    psg.mode = asInt (psgMode);
     psg.level = asInt (psgLevel);
+    psg.octave = asInt (psgOctave);
+    psg.attack = asInt (psgAttack);
+    psg.decay = asInt (psgDecay);
+    psg.sustain = asInt (psgSustain);
+    psg.release = asInt (psgRelease);
+    psg.arp_speed = asInt (psgArpSpeed);
     psg.noise_on = asInt (noiseOn);
     psg.noise_white = asInt (noiseWhite);
     psg.noise_rate = asInt (noiseRate);
     psg.noise_volume = asInt (noiseVolume);
     return psg;
+}
+
+GenisysDrumSettings Snapshot::readDrums() const
+{
+    GenisysDrumSettings drums {};
+    drums.enabled = asInt (drumsOn);
+    drums.level = asInt (drumLevel);
+    return drums;
 }
 
 GenisysConsoleSettings Snapshot::readConsole() const

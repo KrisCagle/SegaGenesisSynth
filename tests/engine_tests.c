@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "genisys_drums.h"
 #include "genisys_engine.h"
 
 static int g_failures = 0;
@@ -344,6 +345,145 @@ static void test_console_filter_response(void) {
     }
 }
 
+/* ---- Drum kit ---- */
+
+static void enable_drums(int enabled) {
+    GenisysDrumSettings d;
+    d.enabled = enabled;
+    d.level = 100;
+    genisys_engine_set_drums(&g_engine, &d);
+}
+
+static void test_drum_kit_mapping(void) {
+    CHECK(genisys_drum_for_note(36)->kind == GENISYS_DRUM_DAC && genisys_drum_for_note(38)->kind == GENISYS_DRUM_DAC,
+          "kick (36) and snare (38) are DAC samples");
+    CHECK(genisys_drum_for_note(42)->kind == GENISYS_DRUM_NOISE && genisys_drum_for_note(49)->kind == GENISYS_DRUM_NOISE,
+          "closed hat (42) and crash (49) use the PSG noise channel");
+    CHECK(genisys_drum_for_note(60)->kind == GENISYS_DRUM_NONE, "unmapped notes are not drums");
+}
+
+static void test_drums_take_fm_channel_6(void) {
+    GenisysPatch p = sine_patch();
+    int i, v, used_six = 0;
+
+    start(48000.0, &p);
+    enable_drums(1);
+    for (i = 0; i < 6; i++) genisys_engine_note_on(&g_engine, 60 + i, 100);
+    for (v = 0; v < GENISYS_NUM_VOICES; v++) if (v == 5 && g_engine.voice[v].state != GENISYS_VOICE_FREE) used_six = 1;
+    CHECK(!used_six, "with drums on, FM never uses channel 6 (the DAC's)");
+    CHECK(g_engine.chip.dac_enable, "with drums on, the chip's DAC mode is enabled");
+
+    enable_drums(0);
+    CHECK(!g_engine.chip.dac_enable, "turning drums off gives channel 6 back to FM");
+}
+
+static double drum_rms(int note, int velocity, int drums_on) {
+    GenisysPatch p = sine_patch();
+    start_console(48000.0, &p, GENISYS_CHIP_CLEAN, 0);
+    enable_drums(drums_on);
+    genisys_engine_drum_hit(&g_engine, note, velocity);
+    genisys_engine_render(&g_engine, g_left, g_right, 9600);
+    return rms(g_left, 0, 9600);
+}
+
+static void test_drum_hits(void) {
+    double kick = drum_rms(36, 127, 1);
+    double soft_kick = drum_rms(36, 40, 1);
+    double hat = drum_rms(42, 127, 1);
+    char msg[128];
+
+    CHECK(kick > 0.01, "a kick hit sounds through the DAC");
+    snprintf(msg, sizeof msg, "a soft kick is quieter (%.1f dB)", 20.0 * log10(soft_kick / kick));
+    CHECK(soft_kick < kick * 0.5, msg);
+    CHECK(hat > 0.001, "a closed hat sounds through the PSG noise channel");
+    CHECK(drum_rms(36, 127, 0) == 0.0, "drum hits are ignored while drums are off");
+    CHECK(drum_rms(60, 127, 1) == 0.0, "unmapped drum notes are silent");
+}
+
+static void test_dac_drum_ends_in_silence(void) {
+    GenisysPatch p = sine_patch();
+    int i;
+    float tail = 0.0f;
+
+    start_console(48000.0, &p, GENISYS_CHIP_CLEAN, 0);
+    enable_drums(1);
+    genisys_engine_drum_hit(&g_engine, 38, 127);
+    genisys_engine_render(&g_engine, g_left, g_right, 48000);
+    for (i = 38400; i < 48000; i++) if (fabsf(g_left[i]) > tail) tail = fabsf(g_left[i]);
+    CHECK(tail < 1e-3f && g_engine.dac_sample == NULL, "a drum sample plays once and returns the DAC to silence");
+}
+
+/* ---- PSG layer ---- */
+
+/* The tone register value the PSG uses for a frequency. */
+static int psg_divider(double hz) { return (int)(PSG_CLOCK_HZ / (32.0 * hz) + 0.5); }
+
+static void set_psg(int mode, int attack) {
+    GenisysPsgSettings s = genisys_default_psg();
+    s.mode = mode;
+    s.level = 15;
+    s.attack = attack;
+    s.sustain = 15; /* hold at full volume, so tests see the attack/release alone */
+    s.arp_speed = 2;
+    genisys_engine_set_psg(&g_engine, &s);
+}
+
+static void render_frames(int frames) {
+    /* 800 output samples at 48 kHz = one 60 Hz frame. */
+    genisys_engine_render(&g_engine, g_left, g_right, 800 * frames);
+}
+
+static void test_psg_unison_doubles_notes(void) {
+    GenisysPatch p = sine_patch();
+    start(48000.0, &p);
+    set_psg(GENISYS_PSG_UNISON, 0);
+    genisys_engine_note_on(&g_engine, 69, 100);
+    CHECK(g_engine.psg.tone_reg[0] == psg_divider(440.0) && g_engine.psg.volume[0] == 0,
+          "unison: a note starts a PSG channel at the same pitch, full volume (attack 0)");
+    genisys_engine_note_off(&g_engine, 69);
+    render_frames(40); /* release 2 frames per step x 15 steps, plus margin */
+    CHECK(g_engine.psg.volume[0] == 15, "unison: after key-up the PSG channel releases to silence");
+}
+
+static void test_psg_low_notes_move_up_octaves(void) {
+    GenisysPatch p = sine_patch();
+    start(48000.0, &p);
+    set_psg(GENISYS_PSG_UNISON, 0);
+    genisys_engine_note_on(&g_engine, 33, 100); /* A1, 55 Hz: below the PSG's ~109 Hz floor */
+    CHECK(g_engine.psg.tone_reg[0] == psg_divider(110.0),
+          "notes below the PSG's range are moved up an octave instead of going out of tune");
+}
+
+static void test_psg_attack_steps_per_frame(void) {
+    GenisysPatch p = sine_patch();
+    start(48000.0, &p);
+    set_psg(GENISYS_PSG_UNISON, 2); /* 2 frames per volume step: 30 frames to full */
+    genisys_engine_note_on(&g_engine, 69, 100);
+    CHECK(g_engine.psg.volume[0] == 15, "attack starts from silence");
+    render_frames(10);
+    CHECK(g_engine.psg.volume[0] > 0 && g_engine.psg.volume[0] < 15, "after 10 frames the attack is part-way up");
+    render_frames(30);
+    CHECK(g_engine.psg.volume[0] == 0, "after 40 frames the attack has reached full volume");
+}
+
+static void test_psg_arpeggio_cycles_held_notes(void) {
+    GenisysPatch p = sine_patch();
+    int seen[3] = { 0, 0, 0 }, f, k;
+    static const int NOTES[3] = { 60, 64, 67 };
+
+    start(48000.0, &p);
+    set_psg(GENISYS_PSG_ARPEGGIO, 0);
+    for (k = 0; k < 3; k++) genisys_engine_note_on(&g_engine, NOTES[k], 100);
+    for (f = 0; f < 12; f++) {
+        render_frames(1);
+        for (k = 0; k < 3; k++) {
+            if (g_engine.psg.tone_reg[0] == psg_divider(note_hz(NOTES[k]))) seen[k] = 1;
+        }
+    }
+    CHECK(seen[0] && seen[1] && seen[2], "arpeggio: one PSG channel cycles through every held note");
+    CHECK(g_engine.psg.volume[1] == 15 && g_engine.psg.volume[2] == 15, "arpeggio: the other PSG channels stay silent");
+}
+
 int main(void) {
     genisys_engine_global_init();
 
@@ -360,6 +500,14 @@ int main(void) {
     test_ladder_offset_never_reaches_output();
     test_ladder_effect_hits_quiet_notes();
     test_console_filter_response();
+    test_drum_kit_mapping();
+    test_drums_take_fm_channel_6();
+    test_drum_hits();
+    test_dac_drum_ends_in_silence();
+    test_psg_unison_doubles_notes();
+    test_psg_low_notes_move_up_octaves();
+    test_psg_attack_steps_per_frame();
+    test_psg_arpeggio_cycles_held_notes();
 
     if (g_failures == 0) {
         printf("\nAll tests passed.\n");
