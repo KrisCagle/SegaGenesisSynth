@@ -38,6 +38,14 @@ These need fixing whatever else we decide. The **[Plugin blocker]** ones would b
 | 9 | Key Scaling is always written as 0 | [desktop/main.c:289](../desktop/main.c:289) | The core supports KS but you can't reach it from the UI, so high notes can't get naturally shorter envelopes |
 | 10 | Widgets are drawn before `BeginDrawing()` | [desktop/main.c:750](../desktop/main.c:750) | Works by accident in raylib. This goes away if the plugin UI replaces the raylib app. |
 
+**Update (Phase 1):** all 10 are fixed on the `phase1-engine` branch.
+
+- #1–#5 and #8 are fixed in the new shared engine (`engine/`), and each has a regression test in `tests/engine_tests.c`.
+- #6: `genisys_engine_global_init()` builds the tables once, up front. The plugin must call it at load time in Phase 2.
+- #7: the desktop app now hands UI and MIDI changes to the audio thread through lock-free queues. The plugin will use JUCE's thread-safe parameters instead.
+- #9: Key Scale is now a per-operator control.
+- #10: the desktop app now opens the frame before drawing.
+
 ---
 
 ## 3. Sound: what makes it *sound like a Genesis*

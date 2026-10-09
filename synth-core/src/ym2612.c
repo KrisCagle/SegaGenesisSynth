@@ -8,7 +8,7 @@
  * (gendev.spritesmind.net). That lineage is the de facto reference every
  * accurate open-source YM2612 emulator ports these same tables from. The
  * sine/exponential tables are instead generated at startup from the
- * documented formula (see ym2612_ensure_tables), not hand-copied.
+ * documented formula (see ym2612_init_tables), not hand-copied.
  */
 
 #include <math.h>
@@ -181,7 +181,7 @@ static const uint8_t LFO_AMS_DEPTH_SHIFT[4] = { 8, 3, 1, 0 };
 
 /* LFO PM output, first (positive) quarter only -- 7 fnum-bit positions x 8
  * PM depths x 8 steps. The full 128-entry-per-(fnum,depth) table used at
- * runtime is generated from this at startup (see ym2612_ensure_tables). */
+ * runtime is generated from this at startup (see ym2612_init_tables). */
 static const uint8_t LFO_PM_OUTPUT[7 * 8][8] = {
     /* FNUM BIT 4 */
     { 0, 0, 0, 0, 0, 0, 0, 0 }, { 0, 0, 0, 0, 0, 0, 0, 0 },
@@ -226,7 +226,7 @@ static uint32_t g_sin_tab[SIN_LEN];
 static int32_t g_lfo_pm_table[128 * 8 * 32]; /* 128 fnum-bit combos x 8 depths x 32 steps */
 static int g_tables_ready = 0;
 
-static void ym2612_ensure_tables(void) {
+void ym2612_init_tables(void) {
     int d, i, x, n;
     double o, m;
 
@@ -334,7 +334,7 @@ static void update_vol_out(Ym2612Operator *op) {
 }
 
 void ym2612_operator_init(Ym2612Operator *op) {
-    ym2612_ensure_tables();
+    ym2612_init_tables();
 
     op->mul = 1;
     op->dt = g_dt_tab[0];
@@ -879,6 +879,13 @@ void ym2612_chip_write(Ym2612Chip *chip, int port, uint8_t addr, uint8_t data) {
 }
 
 void ym2612_chip_clock(Ym2612Chip *chip, sample_t *out_left, sample_t *out_right) {
+    int32_t left, right;
+    ym2612_chip_clock_wide(chip, &left, &right);
+    *out_left = clamp_s16(left);
+    *out_right = clamp_s16(right);
+}
+
+void ym2612_chip_clock_wide(Ym2612Chip *chip, int32_t *out_left, int32_t *out_right) {
     int32_t left = 0, right = 0;
     int c;
 
@@ -889,8 +896,8 @@ void ym2612_chip_clock(Ym2612Chip *chip, sample_t *out_left, sample_t *out_right
         if (ch->pan_r) right += s;
     }
 
-    *out_left = clamp_s16(left);
-    *out_right = clamp_s16(right);
+    *out_left = left;
+    *out_right = right;
 
     if (chip->lfo_timer_overflow) {
         chip->lfo_timer++;
