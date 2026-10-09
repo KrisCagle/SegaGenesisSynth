@@ -1,62 +1,39 @@
 {
+    // Builds go through CMake so VS Code, CI and the command line all build
+    // the same way. The cmake on PATH here is devkitPro's (for the DS), which
+    // can't do native Windows builds, so these use the copy bundled with the
+    // Visual Studio Build Tools.
     "version": "2.0.0",
+    "options": {
+        "env": {
+            "PATH": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin;C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja;C:\\msys64\\ucrt64\\bin;${env:PATH}"
+        }
+    },
     "tasks": [
         {
-            "label": "Build PC prototype",
+            "label": "Build desktop app + tests (GCC)",
             "type": "shell",
-            "command": "gcc",
-            "args": [
-                "-std=c11",
-                "-Wall",
-                "-Wextra",
-                "-g",
-                "-Isynth-core/include",
-                "-Ithird_party",
-                "pc/main.c",
-                "synth-core/src/psg.c",
-                "synth-core/src/ym2612.c",
-                "-o",
-                "build/synth.exe",
-                "-lwinmm",
-                "-lole32",
-                "-lm"
-            ],
-            "options": {
-                "cwd": "${workspaceFolder}"
-            },
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            },
+            "command": "cmake -S . -B build-gcc -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc -DGENISYS_BUILD_DESKTOP=ON -DGENISYS_BUILD_PC_DEMO=ON; cmake --build build-gcc",
+            "options": { "cwd": "${workspaceFolder}" },
+            "group": { "kind": "build", "isDefault": true },
             "problemMatcher": ["$gcc"]
         },
         {
-            "label": "Build Desktop UI",
+            "label": "Run tests (GCC build)",
             "type": "shell",
-            "command": "gcc",
-            "args": [
-                "-std=c11",
-                "-Wall",
-                "-Wextra",
-                "-g",
-                "-Isynth-core/include",
-                "desktop/main.c",
-                "desktop/midi_input.c",
-                "synth-core/src/psg.c",
-                "synth-core/src/ym2612.c",
-                "-o",
-                "build/genesis_synth.exe",
-                "-lraylib",
-                "-lopengl32",
-                "-lgdi32",
-                "-lwinmm",
-                "-lm"
-            ],
-            "options": {
-                "cwd": "${workspaceFolder}"
-            },
-            "group": "build",
-            "problemMatcher": ["$gcc"]
+            "command": "ctest --test-dir build-gcc --output-on-failure",
+            "options": { "cwd": "${workspaceFolder}" },
+            "group": "test",
+            "dependsOn": "Build desktop app + tests (GCC)",
+            "problemMatcher": []
+        },
+        {
+            "label": "Run desktop app",
+            "type": "shell",
+            "command": "./build-gcc/genisys_desktop.exe",
+            "options": { "cwd": "${workspaceFolder}" },
+            "dependsOn": "Build desktop app + tests (GCC)",
+            "problemMatcher": []
         }
     ]
 }

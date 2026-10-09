@@ -9,7 +9,7 @@ project(Genisys
 # The plugin (JUCE) target is added in a later phase; for now the build covers
 # the emulation core, its tests, and the two existing PC front-ends.
 option(GENISYS_BUILD_TESTS   "Build and register the synth-core unit tests" ON)
-option(GENISYS_BUILD_DESKTOP "Build the raylib desktop app (needs raylib installed)" OFF)
+option(GENISYS_BUILD_DESKTOP "Build the raylib desktop app (Windows + MinGW, needs raylib)" OFF)
 option(GENISYS_BUILD_PC_DEMO "Build the Windows-only miniaudio test-tone demo" OFF)
 
 set(CMAKE_C_STANDARD 11)
@@ -39,6 +39,14 @@ if(MATH_LIBRARY)
     target_link_libraries(synth_core PUBLIC ${MATH_LIBRARY})
 endif()
 
+# ---- engine: voices, patches, resampling; shared by every front-end -----
+add_library(genisys_engine STATIC
+    engine/src/genisys_engine.c
+    engine/src/resampler.c)
+target_include_directories(genisys_engine PUBLIC engine/include)
+target_link_libraries(genisys_engine PUBLIC synth_core)
+genisys_set_warnings(genisys_engine)
+
 # ---- Tests ---------------------------------------------------------------
 if(GENISYS_BUILD_TESTS)
     enable_testing()
@@ -52,12 +60,17 @@ if(GENISYS_BUILD_TESTS)
         genisys_set_warnings(${test_name})
         add_test(NAME ${test_name} COMMAND ${test_name})
     endforeach()
+
+    add_executable(engine_tests tests/engine_tests.c)
+    target_link_libraries(engine_tests PRIVATE genisys_engine)
+    genisys_set_warnings(engine_tests)
+    add_test(NAME engine_tests COMMAND engine_tests)
 endif()
 
 # ---- raylib desktop app (to be replaced by the plugin's Standalone app) --
 if(GENISYS_BUILD_DESKTOP)
-    if(NOT WIN32)
-        message(FATAL_ERROR "The desktop app's MIDI input is Windows-only (winmm).")
+    if(NOT WIN32 OR MSVC)
+        message(FATAL_ERROR "The desktop app needs Windows (winmm MIDI) and GCC/MinGW (raylib from MSYS2, C11 atomics).")
     endif()
     # Uses raylib's CMake package if installed, otherwise a plain -lraylib
     # (e.g. MSYS2's mingw-w64-ucrt-x86_64-raylib).
@@ -65,7 +78,7 @@ if(GENISYS_BUILD_DESKTOP)
     add_executable(genisys_desktop
         desktop/main.c
         desktop/midi_input.c)
-    target_link_libraries(genisys_desktop PRIVATE synth_core raylib opengl32 gdi32 winmm)
+    target_link_libraries(genisys_desktop PRIVATE genisys_engine raylib opengl32 gdi32 winmm)
     genisys_set_warnings(genisys_desktop)
 endif()
 
