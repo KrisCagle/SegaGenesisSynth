@@ -31,6 +31,8 @@ namespace genisys::params
         GenisysConsoleSettings readConsole() const;
         GenisysDrumSettings readDrums() const;
         float masterGainDb() const { return masterGain->load(); }
+        int octave() const { return (int) std::lround (octaveShift->load (std::memory_order_relaxed)); }
+        int bendRange() const { return (int) std::lround (bendRangeSemis->load (std::memory_order_relaxed)); }
 
     private:
         struct OpParams
@@ -44,7 +46,8 @@ namespace genisys::params
         std::atomic<float>* algorithm; std::atomic<float>* feedback;
         std::atomic<float>* lfoEnable; std::atomic<float>* lfoRate;
         std::atomic<float>* ams; std::atomic<float>* pms;
-        std::atomic<float>* velocitySens; std::atomic<float>* masterGain;
+        std::atomic<float>* velocitySens; std::atomic<float>* masterGain; std::atomic<float>* octaveShift;
+        std::atomic<float>* bendRangeSemis; std::atomic<float>* vibratoDepth; std::atomic<float>* vibratoRate;
         std::atomic<float>* psgLevel; std::atomic<float>* noiseOn; std::atomic<float>* noiseWhite;
         std::atomic<float>* noiseRate; std::atomic<float>* noiseVolume;
         std::atomic<float>* chipModel; std::atomic<float>* consoleFilter; std::atomic<float>* filterCutoff;

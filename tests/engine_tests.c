@@ -484,6 +484,119 @@ static void test_psg_arpeggio_cycles_held_notes(void) {
     CHECK(g_engine.psg.volume[1] == 15 && g_engine.psg.volume[2] == 15, "arpeggio: the other PSG channels stay silent");
 }
 
+/* ---- Volume math in the PSG's logarithmic steps (2 dB each) ---- */
+
+static void test_noise_drum_velocity_in_db(void) {
+    GenisysPatch p = sine_patch();
+    GenisysDrumSettings d = { 1, 100 };
+
+    start(48000.0, &p);
+    genisys_engine_set_drums(&g_engine, &d);
+    genisys_engine_drum_hit(&g_engine, 42, 127);
+    CHECK(g_engine.psg.volume[3] == 15 - genisys_drum_for_note(42)->start_volume,
+          "a full-velocity hat plays at the drum's own volume");
+    genisys_engine_drum_hit(&g_engine, 42, 64);
+    CHECK(g_engine.psg.volume[3] == 15 - genisys_drum_for_note(42)->start_volume + 6,
+          "velocity 64 (-12 dB) lowers a PSG hat by 6 steps of 2 dB, not to a fraction of its volume");
+}
+
+static void test_psg_level_adds_in_db(void) {
+    GenisysPatch p = sine_patch();
+    GenisysPsgSettings s = genisys_default_psg();
+
+    start(48000.0, &p);
+    s.mode = GENISYS_PSG_UNISON;
+    s.attack = 0;
+    s.sustain = 15;
+    s.level = 12;
+    genisys_engine_set_psg(&g_engine, &s);
+    genisys_engine_note_on(&g_engine, 69, 100);
+    CHECK(g_engine.psg.volume[0] == 3, "PSG level 12 of 15 is 3 steps (6 dB) quieter than full");
+}
+
+/* ---- Expression: pitch bend, mod-wheel vibrato, sustain pedal ---- */
+
+static double bent_hz(int note, double bend) {
+    GenisysPatch p = sine_patch();
+    int frames = 52800;
+    start(48000.0, &p);
+    genisys_engine_note_on(&g_engine, note, 127);
+    genisys_engine_pitch_bend(&g_engine, bend);
+    genisys_engine_render(&g_engine, g_left, g_right, frames);
+    return measure_hz(g_left, frames, 48000.0);
+}
+
+static void test_pitch_bend(void) {
+    static const double BENDS[] = { 2.0, -2.0, 12.0, -12.0, 24.0 };
+    int i;
+    for (i = 0; i < 5; i++) {
+        double want = 440.0 * pow(2.0, BENDS[i] / 12.0), got = bent_hz(69, BENDS[i]);
+        char msg[128];
+        snprintf(msg, sizeof msg, "A4 bent %+.0f semitones plays %.2f Hz (want %.2f, within 0.3%%)", BENDS[i], got, want);
+        CHECK(fabs(got / want - 1.0) < 0.003, msg);
+    }
+}
+
+/* Ratio of the longest to the shortest cycle: how much the pitch wobbles. */
+static double pitch_wobble(double mod) {
+    GenisysPatch p = sine_patch();
+    int i, frames = 48000, last = -1;
+    double shortest = 1e9, longest = 0.0;
+
+    p.vibrato_depth = 50; /* +/- half a semitone at full mod wheel */
+    start(48000.0, &p);
+    genisys_engine_note_on(&g_engine, 69, 127);
+    genisys_engine_mod_wheel(&g_engine, mod);
+    genisys_engine_render(&g_engine, g_left, g_right, frames);
+    for (i = 4800; i < frames - 1; i++) {
+        if (g_left[i] <= 0.0f && g_left[i + 1] > 0.0f) {
+            if (last >= 0) {
+                double period = i - last;
+                if (period < shortest) shortest = period;
+                if (period > longest) longest = period;
+            }
+            last = i;
+        }
+    }
+    return longest / shortest;
+}
+
+static void test_mod_wheel_vibrato(void) {
+    double still = pitch_wobble(0.0), full = pitch_wobble(1.0);
+    char msg[128];
+    snprintf(msg, sizeof msg, "mod wheel at 0: steady pitch (cycle lengths vary %.1f%%)", (still - 1.0) * 100.0);
+    CHECK(still < 1.02, msg);
+    snprintf(msg, sizeof msg, "mod wheel at full: vibrato (cycle lengths vary %.1f%%, want > 4%%)", (full - 1.0) * 100.0);
+    CHECK(full > 1.04, msg);
+}
+
+static void test_sustain_pedal(void) {
+    GenisysPatch p = sine_patch();
+    int v, held = -1;
+
+    start(48000.0, &p);
+    genisys_engine_sustain(&g_engine, 1);
+    genisys_engine_note_on(&g_engine, 60, 100);
+    genisys_engine_note_off(&g_engine, 60);
+    for (v = 0; v < GENISYS_NUM_VOICES; v++) if (g_engine.voice[v].note == 60) held = v;
+    CHECK(held >= 0 && g_engine.voice[held].state == GENISYS_VOICE_HELD,
+          "with the pedal down, a released key keeps sounding");
+    genisys_engine_sustain(&g_engine, 0);
+    CHECK(g_engine.voice[held].state == GENISYS_VOICE_RELEASED, "lifting the pedal releases the note");
+}
+
+static void test_psg_follows_bend(void) {
+    GenisysPatch p = sine_patch();
+    GenisysPsgSettings s = genisys_default_psg();
+    start(48000.0, &p);
+    s.mode = GENISYS_PSG_UNISON;
+    genisys_engine_set_psg(&g_engine, &s);
+    genisys_engine_note_on(&g_engine, 69, 100);
+    genisys_engine_pitch_bend(&g_engine, 12.0);
+    genisys_engine_render(&g_engine, g_left, g_right, 480);
+    CHECK(g_engine.psg.tone_reg[0] == psg_divider(880.0), "the PSG layer follows pitch bend");
+}
+
 int main(void) {
     genisys_engine_global_init();
 
@@ -508,6 +621,12 @@ int main(void) {
     test_psg_low_notes_move_up_octaves();
     test_psg_attack_steps_per_frame();
     test_psg_arpeggio_cycles_held_notes();
+    test_noise_drum_velocity_in_db();
+    test_psg_level_adds_in_db();
+    test_pitch_bend();
+    test_mod_wheel_vibrato();
+    test_sustain_pedal();
+    test_psg_follows_bend();
 
     if (g_failures == 0) {
         printf("\nAll tests passed.\n");

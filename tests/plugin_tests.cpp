@@ -226,6 +226,41 @@ namespace
         check (peakLevel > 0.05f, "with drums on, a channel 10 kick plays the drum kit");
     }
 
+    void testSustainPedal()
+    {
+        auto p = makeProcessor();
+        juce::AudioBuffer<float> buffer (2, kBlock);
+        juce::MidiBuffer midi;
+
+        midi.addEvent (juce::MidiMessage::controllerEvent (1, 64, 127), 0);
+        midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+        process (*p, buffer, midi);
+        midi.addEvent (juce::MidiMessage::noteOff (1, 60), 0);
+        for (int i = 0; i < (int) kRate / kBlock; ++i)
+            process (*p, buffer, midi);
+        check (rms (buffer, 0, kBlock) > 0.005f, "sustain pedal (CC64) holds a note after key-up");
+
+        midi.addEvent (juce::MidiMessage::controllerEvent (1, 64, 0), 0);
+        for (int i = 0; i < (int) (kRate * 3.0) / kBlock; ++i)
+            process (*p, buffer, midi);
+        check (peak (buffer, 0, kBlock) < 1.0e-4f, "lifting the pedal releases it");
+    }
+
+    void testOctaveShiftReleasesCorrectNote()
+    {
+        auto p = makeProcessor();
+        juce::AudioBuffer<float> buffer (2, kBlock);
+        juce::MidiBuffer midi;
+
+        midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+        process (*p, buffer, midi);
+        setIntParam (*p, "octave", 2); // change octave while the key is held
+        midi.addEvent (juce::MidiMessage::noteOff (1, 60), 0);
+        for (int i = 0; i < (int) (kRate * 3.0) / kBlock; ++i)
+            process (*p, buffer, midi);
+        check (peak (buffer, 0, kBlock) < 1.0e-4f, "a note held across an octave change still stops on key-up");
+    }
+
     void testMonoOutput()
     {
         auto p = std::make_unique<GenisysProcessor>();
@@ -257,6 +292,8 @@ int main()
     testStateRestoresInBetweenValues();
     testProgramChange();
     testDrumsOnChannel10();
+    testSustainPedal();
+    testOctaveShiftReleasesCorrectNote();
     testMonoOutput();
 
     if (failures == 0)

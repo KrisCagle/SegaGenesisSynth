@@ -28,10 +28,20 @@ void genisys_engine_global_init(void) {
     }
 }
 
+float engine_velocity_db(int velocity) {
+    if (velocity < 1) return 120.0f;
+    if (velocity > 127) velocity = 127;
+    return 0.75f * g_velocity_att[velocity];
+}
+
 float engine_velocity_gain(int velocity) {
     if (velocity < 1) return 0.0f;
-    if (velocity > 127) velocity = 127;
-    return (float)pow(10.0, -0.75 * g_velocity_att[velocity] / 20.0);
+    return (float)pow(10.0, -engine_velocity_db(velocity) / 20.0);
+}
+
+int engine_db_to_psg_steps(float db) {
+    if (db <= 0.0f) return 0;
+    return (int)(db / 2.0f + 0.5f);
 }
 
 uint8_t genisys_carrier_mask(int algorithm) {
@@ -40,7 +50,12 @@ uint8_t genisys_carrier_mask(int algorithm) {
 }
 
 void genisys_note_to_block_fnum(int note, int *block, int *fnum) {
-    double hz = 440.0 * pow(2.0, (note - 69) / 12.0);
+    genisys_pitch_to_block_fnum((double)note, block, fnum);
+}
+
+void genisys_pitch_to_block_fnum(double pitch, int *block, int *fnum) {
+    double hz = 440.0 * pow(2.0, (pitch - 69.0) / 12.0);
+    int note = (int)floor(pitch + 0.5);
     double f;
     int b;
 
@@ -57,6 +72,11 @@ void genisys_note_to_block_fnum(int note, int *block, int *fnum) {
         b++;
         f = hz * 1048576.0 / (YM2612_SAMPLE_HZ * ldexp(1.0, b - 1));
     }
+    /* A deep downward bend: drop a block rather than lose fnum precision. */
+    while (f < 600.0 && b > 0) {
+        b--;
+        f = hz * 1048576.0 / (YM2612_SAMPLE_HZ * ldexp(1.0, b - 1));
+    }
     if (f > 2047.0) f = 2047.0; /* above ~6.6 kHz: the chip's ceiling */
 
     *block = b;
@@ -71,6 +91,8 @@ GenisysPatch genisys_default_patch(void) {
     memset(&p, 0, sizeof p);
     p.lfo_rate = 3;
     p.velocity_sens = 50;
+    p.vibrato_depth = 50;
+    p.vibrato_rate = 55;
     for (i = 0; i < 4; i++) {
         GenisysOperatorParams *o = &p.op[i];
         o->mul = 1;
@@ -139,6 +161,26 @@ static void write_voice_patch(GenisysEngine *e, int voice) {
     chip_write_channel(e, voice, 0xB4, (uint8_t)(0xC0 | ((p->ams & 3) << 4) | (p->pms & 7)));
 }
 
+static void write_voice_pitch(GenisysEngine *e, int v) {
+    int block, fnum;
+    genisys_pitch_to_block_fnum(e->voice[v].note + engine_pitch_offset(e), &block, &fnum);
+    if (block == e->voice[v].last_block && fnum == e->voice[v].last_fnum) return;
+    /* $A4 (block + fnum high bits) must be written before $A0 (fnum low),
+     * which latches both. */
+    chip_write_channel(e, v, 0xA4, (uint8_t)((block << 3) | ((fnum >> 8) & 7)));
+    chip_write_channel(e, v, 0xA0, (uint8_t)(fnum & 0xFF));
+    e->voice[v].last_block = block;
+    e->voice[v].last_fnum = fnum;
+}
+
+double engine_pitch_offset(const GenisysEngine *e) {
+    double vibrato = 0.0;
+    if (e->mod_wheel > 0.0 && e->patch.vibrato_depth > 0) {
+        vibrato = e->mod_wheel * e->patch.vibrato_depth / 100.0 * sin(2.0 * 3.14159265358979323846 * e->vibrato_phase);
+    }
+    return e->bend_semitones + vibrato;
+}
+
 static void key(GenisysEngine *e, int voice, int on) {
     uint8_t chan_bits = (uint8_t)((voice % 3) | (voice >= 3 ? 0x04 : 0x00));
     ym2612_chip_write(&e->chip, 0, 0x28, (uint8_t)(chan_bits | (on ? 0xF0 : 0x00)));
@@ -160,6 +202,8 @@ void genisys_engine_init(GenisysEngine *e, double sample_rate) {
     for (v = 0; v < GENISYS_NUM_VOICES; v++) {
         e->voice[v].state = GENISYS_VOICE_FREE;
         e->voice[v].velocity = 127;
+        e->voice[v].last_block = -1;
+        e->voice[v].last_fnum = -1;
     }
     genisys_engine_set_patch(e, &e->patch);
     engine_psg_reset(e);
@@ -271,7 +315,7 @@ void genisys_engine_drum_hit(GenisysEngine *e, int note, int velocity) {
         e->dac_pos = 0.0;
         e->dac_gain = gain * (float)e->drum_settings.level / 100.0f;
     } else if (drum->kind == GENISYS_DRUM_NOISE) {
-        engine_psg_noise_drum(e, drum, gain);
+        engine_psg_noise_drum(e, drum, velocity);
     }
 }
 
@@ -322,7 +366,7 @@ static int allocate_voice(GenisysEngine *e, int note) {
 }
 
 void genisys_engine_note_on(GenisysEngine *e, int note, int velocity) {
-    int v, block, fnum;
+    int v;
 
     if (note < 0 || note > 127) return;
     if (velocity <= 0) { /* MIDI convention: note-on with velocity 0 is a note-off */
@@ -338,12 +382,10 @@ void genisys_engine_note_on(GenisysEngine *e, int note, int velocity) {
     e->voice[v].note = note;
     e->voice[v].velocity = velocity;
     e->voice[v].age = ++e->event_counter;
+    e->voice[v].sustained = 0;
 
-    genisys_note_to_block_fnum(note, &block, &fnum);
-    /* $A4 (block + fnum high bits) must be written before $A0 (fnum low),
-     * which latches both. */
-    chip_write_channel(e, v, 0xA4, (uint8_t)((block << 3) | ((fnum >> 8) & 7)));
-    chip_write_channel(e, v, 0xA0, (uint8_t)(fnum & 0xFF));
+    e->voice[v].last_block = e->voice[v].last_fnum = -1; /* force the write */
+    write_voice_pitch(e, v);
     write_voice_tl(e, v);
     key(e, v, 1);
 
@@ -352,8 +394,17 @@ void genisys_engine_note_on(GenisysEngine *e, int note, int velocity) {
 
 void genisys_engine_note_off(GenisysEngine *e, int note) {
     int v;
+
+    if (e->sustain_pedal) {
+        /* Keep sounding until the pedal comes up. */
+        for (v = 0; v < GENISYS_NUM_VOICES; v++) {
+            if (e->voice[v].state == GENISYS_VOICE_HELD && e->voice[v].note == note) e->voice[v].sustained = 1;
+        }
+        return;
+    }
     for (v = 0; v < GENISYS_NUM_VOICES; v++) {
         if (e->voice[v].state == GENISYS_VOICE_HELD && e->voice[v].note == note) {
+            e->voice[v].sustained = 0;
             key(e, v, 0);
             e->voice[v].state = GENISYS_VOICE_RELEASED;
             e->voice[v].age = ++e->event_counter;
@@ -362,8 +413,31 @@ void genisys_engine_note_off(GenisysEngine *e, int note) {
     engine_psg_note_off(e, note);
 }
 
+void genisys_engine_pitch_bend(GenisysEngine *e, double semitones) {
+    e->bend_semitones = semitones;
+}
+
+void genisys_engine_mod_wheel(GenisysEngine *e, double amount) {
+    e->mod_wheel = amount < 0.0 ? 0.0 : (amount > 1.0 ? 1.0 : amount);
+}
+
+void genisys_engine_sustain(GenisysEngine *e, int down) {
+    int v;
+    if (down) {
+        e->sustain_pedal = 1;
+        return;
+    }
+    e->sustain_pedal = 0;
+    for (v = 0; v < GENISYS_NUM_VOICES; v++) {
+        if (e->voice[v].state == GENISYS_VOICE_HELD && e->voice[v].sustained) {
+            genisys_engine_note_off(e, e->voice[v].note);
+        }
+    }
+}
+
 void genisys_engine_all_notes_off(GenisysEngine *e) {
     int v;
+    e->sustain_pedal = 0;
     for (v = 0; v < GENISYS_NUM_VOICES; v++) {
         if (e->voice[v].state == GENISYS_VOICE_HELD) genisys_engine_note_off(e, e->voice[v].note);
     }
@@ -379,6 +453,18 @@ void genisys_engine_all_notes_off(GenisysEngine *e) {
 static void clock_native(GenisysEngine *e, float *left, float *right) {
     int32_t fm_l, fm_r, psg_sum = 0;
     int n, k;
+
+    /* Control-rate pitch: bend and vibrato for every sounding voice. */
+    if (++e->control_counter >= ENGINE_CONTROL_PERIOD) {
+        int v;
+        e->control_counter = 0;
+        e->vibrato_phase += (e->patch.vibrato_rate / 10.0) * ENGINE_CONTROL_PERIOD / YM2612_SAMPLE_HZ;
+        e->vibrato_phase -= floor(e->vibrato_phase);
+        for (v = 0; v < GENISYS_NUM_VOICES; v++) {
+            if (e->voice[v].state != GENISYS_VOICE_FREE) write_voice_pitch(e, v);
+        }
+        engine_psg_update_pitch(e);
+    }
 
     /* 60 Hz frame clock: PSG envelopes, arpeggio, noise drums. */
     e->frame_accum += 1.0;

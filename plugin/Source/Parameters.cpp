@@ -64,6 +64,9 @@ namespace
         return cents[v & 7];
     }
     juce::String percentLabel (int v) { return juce::String (v) + "%"; }
+    juce::String semitoneLabel (int v) { return juce::String (v) + (v == 1 ? " semitone" : " semitones"); }
+    juce::String centsLabel (int v) { return juce::String (v) + " cents"; }
+    juce::String tenthsHzLabel (int v) { return juce::String (v / 10.0, 1) + " Hz"; }
 
     // PSG envelopes step once per 60 Hz frame (~16.7 ms).
     juce::String framesPerStepLabel (int v)
@@ -101,6 +104,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     layout.add (intParam ("ams", "Tremolo Depth (AMS)", 0, 3, def.ams, amsLabel));
     layout.add (intParam ("pms", "Vibrato Depth (PMS)", 0, 7, def.pms, pmsLabel));
     layout.add (intParam ("velocity_sens", "Velocity Sensitivity", 0, 100, def.velocity_sens, percentLabel));
+    layout.add (intParam ("octave", "Octave", -3, 3, 0, octaveLabel));
+    layout.add (intParam ("bend_range", "Pitch Bend Range", 0, 24, 2, semitoneLabel));
+    layout.add (intParam ("vibrato_depth", "Mod Wheel Vibrato Depth", 0, 100, def.vibrato_depth, centsLabel));
+    layout.add (intParam ("vibrato_rate", "Vibrato Speed", 10, 150, def.vibrato_rate, tenthsHzLabel));
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "master_gain", kVersion }, "Master Volume",
         juce::NormalisableRange<float> (-24.0f, 12.0f, 0.1f), 0.0f,
@@ -173,6 +180,8 @@ Snapshot::Snapshot (juce::AudioProcessorValueTreeState& state)
       lfoEnable (raw (state, "lfo_enable")), lfoRate (raw (state, "lfo_rate")),
       ams (raw (state, "ams")), pms (raw (state, "pms")),
       velocitySens (raw (state, "velocity_sens")), masterGain (raw (state, "master_gain")),
+      octaveShift (raw (state, "octave")), bendRangeSemis (raw (state, "bend_range")),
+      vibratoDepth (raw (state, "vibrato_depth")), vibratoRate (raw (state, "vibrato_rate")),
       psgLevel (raw (state, "psg_level")), noiseOn (raw (state, "noise_on")),
       noiseWhite (raw (state, "noise_white")), noiseRate (raw (state, "noise_rate")),
       noiseVolume (raw (state, "noise_volume")),
@@ -212,6 +221,8 @@ GenisysPatch Snapshot::readPatch() const
     patch.ams = asInt (ams);
     patch.pms = asInt (pms);
     patch.velocity_sens = asInt (velocitySens);
+    patch.vibrato_depth = asInt (vibratoDepth);
+    patch.vibrato_rate = asInt (vibratoRate);
 
     for (size_t op = 0; op < 4; ++op)
     {
@@ -275,6 +286,8 @@ void applyPatch (juce::AudioProcessorValueTreeState& state, const GenisysPatch& 
     set ("ams", patch.ams);
     set ("pms", patch.pms);
     set ("velocity_sens", patch.velocity_sens);
+    set ("vibrato_depth", patch.vibrato_depth);
+    set ("vibrato_rate", patch.vibrato_rate);
 
     for (int op = 0; op < 4; ++op)
     {

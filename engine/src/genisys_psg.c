@@ -23,18 +23,21 @@ static void psg_attenuation(GenisysEngine *e, int channel, int attenuation) {
 
 /* The PSG's lowest tone is ~109 Hz (10-bit divider). Notes below that are
  * moved up by octaves so the layer stays in harmony instead of going out of
- * tune or silent. */
-static double note_hz(int note, int octave) {
-    double hz = 440.0 * pow(2.0, (note + 12 * octave - 69) / 12.0);
+ * tune or silent. Includes the current bend/vibrato. */
+static double note_hz(const GenisysEngine *e, int note) {
+    double hz = 440.0 * pow(2.0, (note + 12 * e->psg_settings.octave + engine_pitch_offset(e) - 69.0) / 12.0);
     while (hz < 110.0) hz *= 2.0;
     return hz;
 }
 
 /* ---- Tone voices ---- */
 
+/* Both the envelope volume and the layer level are in the PSG's own
+ * logarithmic 2 dB steps, so they combine by adding attenuations (dB add),
+ * not by multiplying. */
 static void write_voice_volume(GenisysEngine *e, int k) {
-    int effective = (e->psg_voice[k].volume * e->psg_settings.level + 7) / 15;
-    psg_attenuation(e, k, 15 - effective);
+    int attenuation = (15 - e->psg_voice[k].volume) + (15 - e->psg_settings.level);
+    psg_attenuation(e, k, attenuation > 15 ? 15 : attenuation);
 }
 
 static void enter_decay(GenisysEngine *e, GenisysPsgVoice *v) {
@@ -72,7 +75,7 @@ static void start_voice(GenisysEngine *e, int k, int note) {
         v->stage = GENISYS_ENV_ATTACK;
         v->counter = e->psg_settings.attack;
     }
-    psg_tone(e, k, note_hz(note, e->psg_settings.octave));
+    psg_tone(e, k, note_hz(e, note));
     write_voice_volume(e, k);
 }
 
@@ -139,15 +142,16 @@ static void apply_noise_drone(GenisysEngine *e) {
 }
 
 static void write_noise_drum_volume(GenisysEngine *e) {
-    int volume = e->noise_drum_volume_q / 4;
-    int effective = (volume * e->drum_settings.level + 50) / 100;
-    if (effective > 15) effective = 15;
-    psg_attenuation(e, 3, 15 - effective);
+    /* Drum Level is a percentage of amplitude: convert it to PSG steps. */
+    int level = e->drum_settings.level;
+    float level_db = level > 0 ? (float)(-20.0 * log10(level / 100.0)) : 120.0f;
+    int attenuation = (15 - e->noise_drum_volume_q / 4) + engine_db_to_psg_steps(level_db);
+    psg_attenuation(e, 3, attenuation > 15 ? 15 : attenuation);
 }
 
-void engine_psg_noise_drum(GenisysEngine *e, const GenisysDrum *drum, float gain) {
-    int volume = (int)(drum->start_volume * gain + 0.5f);
-    if (volume > 15) volume = 15;
+void engine_psg_noise_drum(GenisysEngine *e, const GenisysDrum *drum, int velocity) {
+    int volume = drum->start_volume - engine_db_to_psg_steps(engine_velocity_db(velocity));
+    if (volume < 0) volume = 0;
     /* Writing the noise control also resets the LFSR, so every hit starts
      * the same way -- the same as on hardware. */
     psg_write(&e->psg, (uint8_t)(0x80 | (3 << 5) | (drum->noise_white ? 0x04 : 0) | (drum->noise_rate & 3)));
@@ -255,6 +259,18 @@ void engine_psg_all_notes_off(GenisysEngine *e) {
     }
 }
 
+void engine_psg_update_pitch(GenisysEngine *e) {
+    int k;
+    if (engine_pitch_offset(e) == 0.0 && e->psg_pitch_dirty == 0) return;
+    for (k = 0; k < GENISYS_PSG_TONE_CHANNELS; k++) {
+        if (e->psg_voice[k].stage != GENISYS_ENV_OFF && e->psg_voice[k].note >= 0) {
+            psg_tone(e, k, note_hz(e, e->psg_voice[k].note));
+        }
+    }
+    /* One more update after the offset returns to 0, to land back in tune. */
+    e->psg_pitch_dirty = engine_pitch_offset(e) != 0.0;
+}
+
 void engine_psg_frame(GenisysEngine *e) {
     int k;
 
@@ -264,7 +280,7 @@ void engine_psg_frame(GenisysEngine *e) {
         if (count > 0 && --e->arp_counter <= 0) {
             e->arp_index = (e->arp_index + 1) % count;
             e->psg_voice[0].note = notes[e->arp_index];
-            psg_tone(e, 0, note_hz(notes[e->arp_index], e->psg_settings.octave));
+            psg_tone(e, 0, note_hz(e, notes[e->arp_index]));
             e->arp_counter = e->psg_settings.arp_speed > 0 ? e->psg_settings.arp_speed : 1;
         }
     }
