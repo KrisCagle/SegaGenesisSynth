@@ -765,6 +765,13 @@ void ym2612_chip_init(Ym2612Chip *chip) {
     chip->mode = 0;
     chip->fn_h_latch = 0;
     chip->sl3_fn_h_latch = 0;
+    chip->dac_enable = 0;
+    chip->dac_value = 0;
+    chip->dac_mode = YM2612_DAC_CLEAN;
+}
+
+void ym2612_chip_set_dac_mode(Ym2612Chip *chip, Ym2612DacMode mode) {
+    chip->dac_mode = mode;
 }
 
 void ym2612_chip_write(Ym2612Chip *chip, int port, uint8_t addr, uint8_t data) {
@@ -789,6 +796,14 @@ void ym2612_chip_write(Ym2612Chip *chip, int port, uint8_t addr, uint8_t data) {
             case 0x27:
                 chip->mode = data;
                 break;
+            case 0x2A:
+                /* 8-bit unsigned sample, centred on 0x80, scaled to the top 8
+                 * of channel 6's 14 output bits. */
+                chip->dac_value = ((int32_t)data - 0x80) * 64;
+                break;
+            case 0x2B:
+                chip->dac_enable = (data & 0x80) ? 1 : 0;
+                break;
             case 0x28: {
                 uint8_t c = data & 0x03;
                 if (c == 3) return;
@@ -801,7 +816,7 @@ void ym2612_chip_write(Ym2612Chip *chip, int port, uint8_t addr, uint8_t data) {
                 break;
             }
             default:
-                break; /* timers ($24-$26), test register ($21): not needed to drive this synth */
+                break; /* timers ($24-$26), test registers ($21, $2C): not needed to drive this synth */
         }
         return;
     }
@@ -885,6 +900,12 @@ void ym2612_chip_clock(Ym2612Chip *chip, sample_t *out_left, sample_t *out_right
     *out_right = clamp_s16(right);
 }
 
+/* Rounds toward minus infinity, like the chip's own bit truncation (and
+ * unlike C's `/`, which rounds toward zero for negative numbers). */
+static int32_t floor_div32(int32_t v) {
+    return (v >= 0) ? v / 32 : -((-v + 31) / 32);
+}
+
 void ym2612_chip_clock_wide(Ym2612Chip *chip, int32_t *out_left, int32_t *out_right) {
     int32_t left = 0, right = 0;
     int c;
@@ -892,8 +913,33 @@ void ym2612_chip_clock_wide(Ym2612Chip *chip, int32_t *out_left, int32_t *out_ri
     for (c = 0; c < 6; c++) {
         Ym2612Channel *ch = &chip->channel[c];
         int32_t s = ym2612_channel_clock(ch, chip->lfo_am, chip->lfo_pm);
-        if (ch->pan_l) left += s;
-        if (ch->pan_r) right += s;
+        if (c == 5 && chip->dac_enable) s = chip->dac_value;
+
+        switch (chip->dac_mode) {
+            case YM2612_DAC_YM3438: {
+                int32_t v = floor_div32(s) * 32; /* keep the top 9 bits */
+                if (ch->pan_l) left += v;
+                if (ch->pan_r) right += v;
+                break;
+            }
+            case YM2612_DAC_YM2612: {
+                /* Results stay in 14-bit units (9-bit step = 32) so all
+                 * three modes play at the same level. A channel switched off
+                 * on one side still leaks its +/-4 offset there, as on the
+                 * real chip. */
+                int32_t v = floor_div32(s);
+                int32_t on = (v >= 0) ? (v + 4) * 32 : (v - 3) * 32;
+                int32_t off = (v >= 0) ? 4 * 32 : -4 * 32;
+                left += ch->pan_l ? on : off;
+                right += ch->pan_r ? on : off;
+                break;
+            }
+            case YM2612_DAC_CLEAN:
+            default:
+                if (ch->pan_l) left += s;
+                if (ch->pan_r) right += s;
+                break;
+        }
     }
 
     *out_left = left;

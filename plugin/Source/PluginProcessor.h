@@ -1,8 +1,10 @@
 #pragma once
 
+#include <array>
 #include <memory>
 #include <vector>
 
+#include <juce_audio_devices/juce_audio_devices.h> // MidiMessageCollector
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "Parameters.h"
@@ -34,7 +36,7 @@ public:
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 0.0; }
+    double getTailLengthSeconds() const override;
 
     // Factory presets, exposed through the host's program list.
     int getNumPrograms() override;
@@ -43,10 +45,23 @@ public:
     const juce::String getProgramName (int index) override;
     void changeProgramName (int, const juce::String&) override {}
 
+    // Community patch files (.tfi / .vgi / .dmp in, .tfi out). Message
+    // thread only. Return an empty string on success, else the reason.
+    juce::String importPatchFile (const juce::File& file);
+    juce::String exportPatchFile (const juce::File& file);
+
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
     juce::AudioProcessorValueTreeState state;
+
+    // Notes played on the editor's on-screen keyboard (or the computer
+    // keyboard), merged into the host's MIDI at the start of each block.
+    juce::MidiKeyboardState keyboardState;
+
+    // Other MIDI from the editor (on-screen pitch bend and mod wheels).
+    // Thread-safe: the editor adds, processBlock drains.
+    juce::MidiMessageCollector editorMidi;
 
 private:
     void syncParametersToEngine();
@@ -59,12 +74,22 @@ private:
 
     GenisysPatch lastPatch {};
     GenisysPsgSettings lastPsg {};
+    GenisysConsoleSettings lastConsole {};
+    GenisysDrumSettings lastDrums {};
     bool forceParameterSync = true;
+
+    genisys::Effects effects;
+    double hostBpm = 120.0;
 
     juce::SmoothedValue<float> masterGain; // ramps volume changes to avoid clicks
     std::vector<float> scratchLeft, scratchRight;
 
     int currentProgram = 0;
+
+    // The note each incoming (channel, note) actually started after the
+    // Octave shift, so its note-off releases the same note even if the
+    // octave changed while it was held. -1 = not playing.
+    std::array<std::array<int, 128>, 16> playedNote;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GenisysProcessor)
 };

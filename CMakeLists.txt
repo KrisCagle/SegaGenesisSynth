@@ -15,6 +15,7 @@ else()
 endif()
 option(GENISYS_BUILD_PLUGIN  "Build the Genisys plugin (VST3/AU/Standalone) with JUCE" ${GENISYS_PLUGIN_DEFAULT})
 option(GENISYS_BUILD_TESTS   "Build and register the unit tests" ON)
+option(GENISYS_BUILD_TOOLS   "Build command-line tools (demo WAV renderer)" ON)
 option(GENISYS_BUILD_DESKTOP "Build the raylib desktop app (Windows + MinGW, needs raylib)" OFF)
 option(GENISYS_BUILD_PC_DEMO "Build the Windows-only miniaudio test-tone demo" OFF)
 
@@ -51,8 +52,11 @@ endif()
 
 # ---- engine: voices, patches, resampling; shared by every front-end -----
 add_library(genisys_engine STATIC
+    engine/src/genisys_drums.c
     engine/src/genisys_engine.c
+    engine/src/genisys_patch_io.c
     engine/src/genisys_presets.c
+    engine/src/genisys_psg.c
     engine/src/resampler.c)
 target_include_directories(genisys_engine PUBLIC engine/include)
 target_link_libraries(genisys_engine PUBLIC synth_core)
@@ -72,10 +76,19 @@ if(GENISYS_BUILD_TESTS)
         add_test(NAME ${test_name} COMMAND ${test_name})
     endforeach()
 
-    add_executable(engine_tests tests/engine_tests.c)
-    target_link_libraries(engine_tests PRIVATE genisys_engine)
-    genisys_set_warnings(engine_tests)
-    add_test(NAME engine_tests COMMAND engine_tests)
+    foreach(test_name engine_tests patch_io_tests)
+        add_executable(${test_name} tests/${test_name}.c)
+        target_link_libraries(${test_name} PRIVATE genisys_engine)
+        genisys_set_warnings(${test_name})
+        add_test(NAME ${test_name} COMMAND ${test_name})
+    endforeach()
+endif()
+
+# ---- Tools -------------------------------------------------------------------
+if(GENISYS_BUILD_TOOLS)
+    add_executable(genisys_render tools/genisys_render.c)
+    target_link_libraries(genisys_render PRIVATE genisys_engine)
+    genisys_set_warnings(genisys_render)
 endif()
 
 # ---- raylib desktop app (to be replaced by the plugin's Standalone app) --

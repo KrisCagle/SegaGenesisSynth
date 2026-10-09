@@ -1,7 +1,9 @@
 #include "PluginProcessor.h"
+#include "PluginEditor.h"
 
 #include <cstring>
 
+#include "genisys_patch_io.h"
 #include "genisys_presets.h"
 
 namespace
@@ -25,19 +27,23 @@ GenisysProcessor::GenisysProcessor()
       params (state)
 {
     genisys_engine_init (engine.get(), 44100.0);
+    for (auto& channel : playedNote)
+        channel.fill (-1);
     scratchLeft.resize (kScratchFrames);
     scratchRight.resize (kScratchFrames);
 }
 
 GenisysProcessor::~GenisysProcessor() = default;
 
-void GenisysProcessor::prepareToPlay (double sampleRate, int)
+void GenisysProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     // A fresh engine at the host's rate. Patch and PSG settings are pushed
     // again on the next block.
     genisys_engine_init (engine.get(), sampleRate);
     forceParameterSync = true;
 
+    editorMidi.reset (sampleRate);
+    effects.prepare (sampleRate, samplesPerBlock, getTotalNumOutputChannels());
     masterGain.reset (sampleRate, 0.02);
     masterGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (params.masterGainDb()));
 }
@@ -66,17 +72,83 @@ void GenisysProcessor::syncParametersToEngine()
         lastPsg = psg;
     }
 
+    const GenisysConsoleSettings console = params.readConsole();
+    if (forceParameterSync || console.chip_model != lastConsole.chip_model
+        || console.filter_on != lastConsole.filter_on || console.filter_hz != lastConsole.filter_hz)
+    {
+        genisys_engine_set_console (engine.get(), &console);
+        lastConsole = console;
+    }
+
+    const GenisysDrumSettings drums = params.readDrums();
+    if (forceParameterSync || std::memcmp (&drums, &lastDrums, sizeof drums) != 0)
+    {
+        genisys_engine_set_drums (engine.get(), &drums);
+        lastDrums = drums;
+    }
+
     forceParameterSync = false;
 }
 
 void GenisysProcessor::handleMidi (const juce::MidiMessage& message)
 {
+    // General MIDI convention: channel 10 is drums. Drum hits are one-shots,
+    // so their note-offs are ignored. With drums off, channel 10 plays FM.
+    if (lastDrums.enabled && message.getChannel() == 10)
+    {
+        if (message.isNoteOn())
+            genisys_engine_drum_hit (engine.get(), message.getNoteNumber(), message.getVelocity());
+        return;
+    }
+
+    const auto channel = (size_t) juce::jlimit (0, 15, message.getChannel() - 1);
+    const auto note = (size_t) juce::jlimit (0, 127, message.getNoteNumber());
+
+    if (message.isPitchWheel())
+    {
+        // 14-bit wheel, centre 8192, mapped through the Pitch Bend Range.
+        const double amount = (message.getPitchWheelValue() - 8192) / 8192.0;
+        genisys_engine_pitch_bend (engine.get(), amount * params.bendRange());
+        return;
+    }
+    if (message.isControllerOfType (1)) // mod wheel
+    {
+        genisys_engine_mod_wheel (engine.get(), message.getControllerValue() / 127.0);
+        return;
+    }
+    if (message.isSustainPedalOn() || message.isSustainPedalOff())
+    {
+        genisys_engine_sustain (engine.get(), message.isSustainPedalOn() ? 1 : 0);
+        return;
+    }
+    if (message.isResetAllControllers())
+    {
+        genisys_engine_pitch_bend (engine.get(), 0.0);
+        genisys_engine_mod_wheel (engine.get(), 0.0);
+        genisys_engine_sustain (engine.get(), 0);
+        return;
+    }
+
     if (message.isNoteOn())
-        genisys_engine_note_on (engine.get(), message.getNoteNumber(), message.getVelocity());
+    {
+        const int played = juce::jlimit (0, 127, (int) note + 12 * params.octave());
+        if (playedNote[channel][note] >= 0 && playedNote[channel][note] != played)
+            genisys_engine_note_off (engine.get(), playedNote[channel][note]);
+        playedNote[channel][note] = played;
+        genisys_engine_note_on (engine.get(), played, message.getVelocity());
+    }
     else if (message.isNoteOff())
-        genisys_engine_note_off (engine.get(), message.getNoteNumber());
+    {
+        if (playedNote[channel][note] >= 0)
+            genisys_engine_note_off (engine.get(), playedNote[channel][note]);
+        playedNote[channel][note] = -1;
+    }
     else if (message.isAllNotesOff() || message.isAllSoundOff())
+    {
         genisys_engine_all_notes_off (engine.get());
+        for (auto& ch : playedNote)
+            ch.fill (-1);
+    }
 }
 
 void GenisysProcessor::render (juce::AudioBuffer<float>& buffer, int start, int count)
@@ -90,9 +162,8 @@ void GenisysProcessor::render (juce::AudioBuffer<float>& buffer, int start, int 
 
         for (int i = 0; i < n; ++i)
         {
-            const float gain = masterGain.getNextValue();
-            const float l = scratchLeft[(size_t) i] * gain;
-            const float r = scratchRight[(size_t) i] * gain;
+            const float l = scratchLeft[(size_t) i];
+            const float r = scratchRight[(size_t) i];
 
             if (channels >= 2)
             {
@@ -117,6 +188,13 @@ void GenisysProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
     for (int ch = 2; ch < buffer.getNumChannels(); ++ch)
         buffer.clear (ch, 0, buffer.getNumSamples());
 
+    keyboardState.processNextMidiBuffer (midi, 0, buffer.getNumSamples(), true);
+    {
+        juce::MidiBuffer fromEditor;
+        editorMidi.removeNextBlockOfMessages (fromEditor, buffer.getNumSamples());
+        midi.addEvents (fromEditor, 0, buffer.getNumSamples(), 0);
+    }
+
     syncParametersToEngine();
     masterGain.setTargetValue (juce::Decibels::decibelsToGain (params.masterGainDb()));
 
@@ -134,13 +212,31 @@ void GenisysProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
     }
 
     render (buffer, position, numSamples - position);
+
+    // Effects, then Master Volume (ramped per sample to avoid clicks).
+    if (auto* host = getPlayHead())
+        if (auto hostPosition = host->getPosition())
+            if (auto bpm = hostPosition->getBpm())
+                hostBpm = *bpm;
+    effects.process (buffer, params.readEffects(), hostBpm);
+
+    const int outputs = juce::jmin (2, buffer.getNumChannels());
+    for (int i = 0; i < numSamples; ++i)
+    {
+        const float gain = masterGain.getNextValue();
+        for (int ch = 0; ch < outputs; ++ch)
+            buffer.getWritePointer (ch)[i] *= gain;
+    }
+}
+
+double GenisysProcessor::getTailLengthSeconds() const
+{
+    return genisys::Effects::tailSeconds (params.readEffects());
 }
 
 juce::AudioProcessorEditor* GenisysProcessor::createEditor()
 {
-    // Temporary: the host-style list of every parameter. The themed editor
-    // replaces this in Phase 5 of the roadmap.
-    return new juce::GenericAudioProcessorEditor (*this);
+    return new GenisysEditor (*this);
 }
 
 int GenisysProcessor::getNumPrograms()
@@ -161,6 +257,34 @@ const juce::String GenisysProcessor::getProgramName (int index)
 {
     const char* name = genisys_preset_name (index);
     return name != nullptr ? juce::String (name) : juce::String();
+}
+
+juce::String GenisysProcessor::importPatchFile (const juce::File& file)
+{
+    juce::MemoryBlock data;
+    if (! file.loadFileAsData (data))
+        return "Couldn't read " + file.getFileName() + ".";
+
+    // Start from the current patch so performance settings (voice mode,
+    // vibrato, velocity...) survive; the file supplies the FM sound.
+    GenisysPatch patch = params.readPatch();
+    const auto result = genisys_patch_import (static_cast<const uint8_t*> (data.getData()), data.getSize(),
+                                              file.getFileName().toRawUTF8(), &patch);
+    if (result != GENISYS_PATCH_OK)
+        return genisys_patch_result_text (result);
+
+    genisys::params::applyPatch (state, patch);
+    return {};
+}
+
+juce::String GenisysProcessor::exportPatchFile (const juce::File& file)
+{
+    const GenisysPatch patch = params.readPatch();
+    uint8_t bytes[GENISYS_TFI_SIZE];
+    const auto size = genisys_patch_export_tfi (&patch, bytes);
+    if (! file.replaceWithData (bytes, size))
+        return "Couldn't write " + file.getFileName() + ".";
+    return {};
 }
 
 void GenisysProcessor::getStateInformation (juce::MemoryBlock& destData)
