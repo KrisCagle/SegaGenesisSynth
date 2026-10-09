@@ -13,7 +13,7 @@
         {
             "label": "Build plugin + tests (MSVC)",
             "type": "shell",
-            "command": "cmake -S . -B build-msvc -G 'Visual Studio 17 2022' -A x64; cmake --build build-msvc --config Release --parallel",
+            "command": "cmake -S . -B build-msvc -G 'Visual Studio 17 2022' -A x64 -DGENISYS_BUILD_UI_SNAPSHOT=ON; cmake --build build-msvc --config Release --parallel",
             "options": { "cwd": "${workspaceFolder}" },
             "group": { "kind": "build", "isDefault": true },
             "problemMatcher": ["$msCompile"]
