@@ -48,6 +48,10 @@ public:
 
     juce::AudioProcessorValueTreeState state;
 
+    // Notes played on the editor's on-screen keyboard (or the computer
+    // keyboard), merged into the host's MIDI at the start of each block.
+    juce::MidiKeyboardState keyboardState;
+
 private:
     void syncParametersToEngine();
     void handleMidi (const juce::MidiMessage& message);

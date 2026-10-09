@@ -39,6 +39,7 @@ juce_add_plugin(Genisys
 add_library(GenisysSharedCode INTERFACE)
 target_sources(GenisysSharedCode INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Parameters.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/PluginEditor.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/PluginProcessor.cpp)
 target_include_directories(GenisysSharedCode INTERFACE Source)
 target_compile_definitions(GenisysSharedCode INTERFACE
