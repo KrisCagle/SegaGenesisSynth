@@ -41,7 +41,10 @@ target_sources(GenisysSharedCode INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Effects.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Parameters.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/PluginEditor.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/PluginProcessor.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/PluginProcessor.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/ui/PixelFont.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/ui/Widgets.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/ui/Panels.cpp)
 target_include_directories(GenisysSharedCode INTERFACE Source)
 target_compile_definitions(GenisysSharedCode INTERFACE
     JUCE_WEB_BROWSER=0          # no embedded browser needed
@@ -62,4 +65,11 @@ if(GENISYS_BUILD_TESTS)
     target_sources(plugin_tests PRIVATE ${PROJECT_SOURCE_DIR}/tests/plugin_tests.cpp)
     target_link_libraries(plugin_tests PRIVATE GenisysSharedCode)
     add_test(NAME plugin_tests COMMAND plugin_tests)
+endif()
+
+if(GENISYS_BUILD_TOOLS)
+    # Renders every editor tab to PNG for reviewing UI changes.
+    juce_add_console_app(genisys_ui_snapshot PRODUCT_NAME "Genisys UI Snapshot")
+    target_sources(genisys_ui_snapshot PRIVATE ${PROJECT_SOURCE_DIR}/tools/ui_snapshot.cpp)
+    target_link_libraries(genisys_ui_snapshot PRIVATE GenisysSharedCode)
 endif()

@@ -1,0 +1,654 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Genisys UI Mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --chassis: #0b0b0f;
+    --chassis-2: #15151c;
+    --menu-top: #1a3fb8;
+    --menu-bottom: #071a5c;
+    --bevel-light: #8fd3ff;
+    --bevel-dark: #021047;
+    --text: #f4f7ff;
+    --dim: #8ea3d9;
+    --yellow: #ffd400;
+    --red: #e60012;
+    --cyan: #29d3ff;
+    --cyan-dim: #0d4a5e;
+    --green: #3dff7a;
+    --pixel: "Press Start 2P", "Courier New", monospace;
+    --body: "VT323", "Courier New", monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #050507; color: var(--text); }
+  body { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; }
+
+  .note { font: 18px var(--body); color: var(--dim); max-width: 1000px; margin: 0 auto 10px; }
+  .wrap { display: flex; flex-direction: column; align-items: center; }
+
+  /* ---- The plugin window ---- */
+  .plugin {
+    width: 1000px; height: 690px; position: relative; overflow: hidden;
+    background:
+      repeating-linear-gradient(90deg, rgba(255,255,255,.015) 0 2px, transparent 2px 6px),
+      linear-gradient(180deg, var(--chassis-2), var(--chassis));
+    border: 2px solid #2a2a35; border-radius: 10px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.06);
+    font-family: var(--pixel);
+    user-select: none;
+  }
+  .plugin.crt::after {  /* scanlines */
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: repeating-linear-gradient(180deg, rgba(0,0,0,.18) 0 1px, transparent 1px 3px);
+    mix-blend-mode: multiply;
+  }
+
+  /* ---- Header ---- */
+  .header { display: flex; align-items: center; gap: 14px; padding: 12px 16px 8px; height: 74px; }
+  .logo {
+    font-size: 30px; letter-spacing: 2px; line-height: 1;
+    background: linear-gradient(180deg, #ffffff 0%, #cfe6ff 45%, #3a7bd5 55%, #9cc9ff 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    filter: drop-shadow(3px 3px 0 #000) drop-shadow(0 0 6px rgba(41,211,255,.35));
+  }
+  .stripe {
+    font-size: 8px; color: #fff; background: var(--red); padding: 4px 6px; margin-top: 6px;
+    box-shadow: 2px 2px 0 #000; letter-spacing: 1px;
+  }
+  .brand { display: flex; flex-direction: column; }
+
+  .cart {
+    flex: 1; display: flex; align-items: center; gap: 10px;
+    background: linear-gradient(180deg, #2b2b33, #17171d);
+    border: 2px solid #3a3a46; border-radius: 6px 6px 3px 3px; padding: 6px 8px; height: 52px;
+    box-shadow: inset 0 2px 0 rgba(255,255,255,.05), 0 3px 0 #000;
+  }
+  .cart .label {
+    flex: 1; height: 38px; display: flex; flex-direction: column; justify-content: center; align-items: center;
+    background: linear-gradient(180deg, var(--menu-top), var(--menu-bottom));
+    border: 2px solid var(--bevel-light); outline: 2px solid var(--bevel-dark);
+  }
+  .cart .cat { font-size: 7px; color: var(--yellow); letter-spacing: 1px; }
+  .cart .name { font-size: 12px; margin-top: 4px; text-shadow: 2px 2px 0 #000; }
+  .arrow {
+    font-size: 12px; color: var(--yellow); cursor: pointer; padding: 6px; text-shadow: 2px 2px 0 #000;
+  }
+  .arrow:hover { color: #fff; }
+
+  .pad-buttons { display: flex; gap: 8px; align-items: center; }
+  .abc { display: flex; flex-direction: column; align-items: center; gap: 3px; cursor: pointer; }
+  .abc .btn {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #4a4a55, #111 70%);
+    border: 2px solid #000; box-shadow: 0 3px 0 #000, inset 0 -2px 4px rgba(0,0,0,.6);
+    display: flex; align-items: center; justify-content: center; font-size: 9px; color: #ddd;
+  }
+  .abc:active .btn { transform: translateY(2px); box-shadow: 0 1px 0 #000; }
+  .abc span { font-size: 6px; color: var(--dim); }
+
+  /* ---- Game-menu tabs ---- */
+  .tabs { display: flex; gap: 4px; padding: 0 16px; }
+  .tab {
+    font-size: 9px; padding: 8px 12px 7px 18px; cursor: pointer; position: relative; color: var(--dim);
+    border: 2px solid transparent; border-bottom: none;
+  }
+  .tab.active {
+    color: #fff; background: linear-gradient(180deg, var(--menu-top), #0e2a8a);
+    border-color: var(--bevel-light); text-shadow: 2px 2px 0 #000;
+  }
+  .tab.active::before {
+    content: "\25B6"; position: absolute; left: 5px; top: 8px; color: var(--yellow);
+    animation: blink 1s steps(1) infinite;
+  }
+  .tab:hover:not(.active) { color: #fff; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* ---- Menu windows ---- */
+  .page { position: absolute; left: 16px; right: 16px; top: 112px; height: 368px; display: none; }
+  .page.active { display: grid; }
+  .win {
+    background: linear-gradient(180deg, var(--menu-top) 0%, var(--menu-bottom) 100%);
+    border: 3px solid var(--bevel-light); outline: 3px solid var(--bevel-dark);
+    box-shadow: inset 0 0 0 2px rgba(0,0,0,.35), 4px 4px 0 rgba(0,0,0,.5);
+    padding: 10px; position: relative;
+  }
+  .win h3 {
+    margin: 0 0 8px; font-size: 9px; color: var(--yellow); text-shadow: 2px 2px 0 #000; font-weight: normal;
+    letter-spacing: 1px;
+  }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; justify-content: space-around; }
+
+  /* ---- Knobs ---- */
+  .knob { display: flex; flex-direction: column; align-items: center; width: 70px; cursor: ns-resize; }
+  .knob .k-label { font: 17px/1 var(--body); color: #dfe8ff; margin-bottom: 3px; letter-spacing: .5px; text-align: center; height: 17px; }
+  .knob svg { width: 52px; height: 52px; display: block; }
+  .knob .k-value {
+    margin-top: 3px; font-size: 7px; color: var(--cyan); background: #020a24; border: 1px solid #1d3f8f;
+    padding: 3px 4px; min-width: 52px; text-align: center;
+  }
+  .knob:hover .k-label { color: var(--yellow); }
+  .knob.small { width: 58px; }
+  .knob.small svg { width: 40px; height: 40px; }
+
+  /* ---- Segmented selectors ---- */
+  .seg { display: flex; border: 2px solid var(--bevel-dark); }
+  .seg div { font-size: 7px; padding: 6px 7px; cursor: pointer; color: var(--dim); background: #061650; }
+  .seg div.on { background: var(--yellow); color: #111; }
+  .seg-label { font: 17px var(--body); color: #dfe8ff; margin: 6px 0 3px; }
+
+  .led-btn { display: flex; align-items: center; gap: 6px; font-size: 7px; cursor: pointer; color: #dfe8ff; }
+  .led-btn i { width: 10px; height: 10px; border-radius: 50%; background: #2a0000; border: 1px solid #000; display: inline-block; }
+  .led-btn.on i { background: var(--red); box-shadow: 0 0 8px var(--red); }
+
+  /* ---- VOICE page ---- */
+  #voice { grid-template-columns: 300px 1fr 250px; gap: 12px; }
+  .algos { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .algo { background: #020a24; border: 2px solid #1d3f8f; cursor: pointer; padding: 2px; }
+  .algo svg { width: 100%; height: 58px; display: block; }
+  .algo.on { border-color: var(--yellow); box-shadow: 0 0 8px rgba(255,212,0,.5); }
+  .algo .num { font-size: 6px; color: var(--dim); text-align: center; padding: 2px 0 1px; }
+  .algo.on .num { color: var(--yellow); }
+  .explain { font: 18px/1.05 var(--body); color: #cfe0ff; margin-top: 8px; }
+
+  /* ---- OPERATORS page ---- */
+  #ops { grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .op-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .op-head h3 { margin: 0; }
+  .badge { font-size: 6px; padding: 3px 5px; border: 1px solid; }
+  .badge.car { color: #111; background: var(--yellow); border-color: #fff; }
+  .badge.mod { color: var(--cyan); border-color: var(--cyan); }
+  .env { background: #020a24; border: 1px solid #1d3f8f; height: 54px; margin: 4px 0 6px; }
+  .env svg { width: 100%; height: 100%; display: block; }
+  .op-toggles { display: flex; justify-content: space-between; margin-top: 6px; }
+  .chip-toggle { font-size: 6px; padding: 4px 5px; border: 1px solid #1d3f8f; color: var(--dim); cursor: pointer; }
+  .chip-toggle.on { color: #111; background: var(--cyan); border-color: #fff; }
+
+  /* ---- PSG / FX / DRUMS ---- */
+  #psg { grid-template-columns: 1fr 1fr; gap: 12px; }
+  #fx { grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  #drums { grid-template-columns: 1fr 250px; gap: 12px; }
+  .pads { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+  .pad {
+    height: 62px; background: linear-gradient(180deg, #2a2a35, #121218); border: 2px solid #000;
+    box-shadow: 0 3px 0 #000, inset 0 1px 0 rgba(255,255,255,.08); cursor: pointer;
+    display: flex; flex-direction: column; justify-content: space-between; padding: 6px;
+  }
+  .pad b { font-size: 7px; font-weight: normal; }
+  .pad small { font: 15px var(--body); color: var(--dim); }
+  .pad.dac b { color: var(--yellow); }
+  .pad.psg b { color: var(--cyan); }
+  .pad:active, .pad.hit { background: linear-gradient(180deg, #ffd400, #c79a00); }
+  .pad:active b, .pad.hit b, .pad:active small, .pad.hit small { color: #111; }
+  .legend { font: 17px/1.1 var(--body); color: #cfe0ff; }
+  .legend .y { color: var(--yellow); } .legend .c { color: var(--cyan); }
+
+  /* ---- Bottom: help box, screen, keyboard ---- */
+  .bottom { position: absolute; left: 16px; right: 16px; top: 492px; height: 186px; display: grid;
+            grid-template-columns: 1fr 230px; grid-template-rows: 58px 1fr; gap: 8px; }
+  .textbox {
+    grid-column: 1; background: #000; border: 3px solid #fff; outline: 3px solid #000;
+    padding: 8px 12px; font: 20px/1.05 var(--body); color: #fff; position: relative;
+  }
+  .textbox b { color: var(--yellow); font-weight: normal; }
+  .textbox::after { content: "\25BC"; position: absolute; right: 8px; bottom: 4px; font-size: 10px; color: var(--yellow);
+                    animation: blink 1s steps(1) infinite; }
+  .screen {
+    grid-column: 2; grid-row: 1 / 3; background: #031008; border: 3px solid #333; border-radius: 6px;
+    box-shadow: inset 0 0 18px rgba(61,255,122,.25); position: relative; overflow: hidden;
+  }
+  .screen svg { width: 100%; height: 100%; display: block; }
+  .screen .tag { position: absolute; left: 8px; top: 6px; font-size: 6px; color: var(--green); }
+  .screen .voices { position: absolute; left: 8px; bottom: 6px; display: flex; gap: 4px; }
+  .screen .voices i { width: 18px; height: 8px; background: #0b2a14; border: 1px solid #1b5a2e; display: inline-block; }
+  .screen .voices i.on { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .play { grid-column: 1; display: flex; gap: 8px; }
+  .wheels { display: flex; gap: 6px; padding: 4px; background: #111; border: 2px solid #000; }
+  .wheel { width: 22px; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  .wheel .slot { width: 18px; flex: 1; background: linear-gradient(90deg, #050505, #2a2a2a, #050505); border: 1px solid #000; position: relative; }
+  .wheel .slot i { position: absolute; left: 1px; right: 1px; height: 14px; background: linear-gradient(180deg, #666, #222); top: 40%; }
+  .wheel span { font-size: 5px; color: var(--dim); }
+  .octave { display: flex; flex-direction: column; justify-content: center; gap: 4px; align-items: center; width: 64px; }
+  .octave .ob { font-size: 7px; padding: 5px 6px; background: #061650; border: 2px solid var(--bevel-light); cursor: pointer; }
+  .octave .ov { font-size: 7px; color: var(--yellow); }
+  .keys { flex: 1; position: relative; height: 100%; }
+  .keys .w { position: absolute; top: 0; bottom: 0; background: linear-gradient(180deg, #f2f2f2, #cfcfcf);
+             border: 1px solid #222; border-radius: 0 0 3px 3px; cursor: pointer; }
+  .keys .w.down { background: linear-gradient(180deg, #ffd400, #d6a900); }
+  .keys .b { position: absolute; top: 0; height: 60%; background: linear-gradient(180deg, #333, #050505);
+             border: 1px solid #000; border-radius: 0 0 2px 2px; z-index: 2; cursor: pointer; }
+  .keys .b.down { background: linear-gradient(180deg, #ffd400, #8a6d00); }
+
+  .toolbar { display: flex; justify-content: space-between; align-items: center; width: 1000px; margin-top: 10px;
+             font: 18px var(--body); color: var(--dim); }
+  .toolbar label { cursor: pointer; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="note">Genisys UI mockup: click the tabs, drag the knobs up and down (Shift for fine control, double-click to reset), pick algorithms, hover anything for help. Sound isn't connected in this mockup.</div>
+
+  <div class="plugin crt" id="plugin">
+    <!-- Header -->
+    <div class="header">
+      <div class="brand">
+        <div class="logo">GENISYS</div>
+        <div class="stripe">16-BIT FM SYNTHESIZER</div>
+      </div>
+      <div class="cart" data-help="<b>PRESET CARTRIDGE</b> - Choose a sound. Use the arrows or click the label for the full list by category.">
+        <span class="arrow" id="prev">&#9664;</span>
+        <div class="label"><div class="cat" id="pcat">BASS</div><div class="name" id="pname">SLAP BASS</div></div>
+        <span class="arrow" id="next">&#9654;</span>
+      </div>
+      <div class="pad-buttons">
+        <div class="abc" data-help="<b>A - LOAD</b> - Load a community Genesis patch (.TFI .VGI .DMP)."><div class="btn">A</div><span>LOAD</span></div>
+        <div class="abc" data-help="<b>B - SAVE</b> - Save this sound as a .TFI patch."><div class="btn">B</div><span>SAVE</span></div>
+        <div class="abc" data-help="<b>C - COMPARE</b> - Flip between two versions of your sound (A/B)."><div class="btn">C</div><span>A/B</span></div>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <div class="tab active" data-page="voice" data-help="<b>VOICE</b> - The big picture: algorithm, quick sound shaping, how notes play.">VOICE</div>
+      <div class="tab" data-page="ops" data-help="<b>OPERATORS</b> - Deep editing of the 4 FM operators.">OPERATORS</div>
+      <div class="tab" data-page="psg" data-help="<b>PSG</b> - The square-wave chip: layers, arpeggios and noise.">PSG</div>
+      <div class="tab" data-page="drums" data-help="<b>DRUMS</b> - The 8-bit sample kit on MIDI channel 10.">DRUMS</div>
+      <div class="tab" data-page="fx" data-help="<b>FX</b> - Chorus, echo and reverb.">FX</div>
+    </div>
+
+    <!-- VOICE page -->
+    <div class="page active" id="voice">
+      <div class="win">
+        <h3>ALGORITHM</h3>
+        <div class="algos" id="algos"></div>
+        <div class="explain" id="algoExplain"></div>
+      </div>
+      <div class="win">
+        <h3>QUICK SOUND</h3>
+        <div class="row" id="macros"></div>
+        <h3 style="margin-top:12px">CONSOLE</h3>
+        <div class="row" style="align-items:flex-end">
+          <div>
+            <div class="seg-label">CHIP</div>
+            <div class="seg" data-help="<b>CHIP</b> - YM2612 is the gritty original Model 1 sound. YM3438 is cleaner. CLEAN removes the DAC grit.">
+              <div class="on">YM2612</div><div>YM3438</div><div>CLEAN</div>
+            </div>
+          </div>
+          <div id="consoleKnobs" class="row"></div>
+        </div>
+      </div>
+      <div class="win">
+        <h3>PLAY MODE</h3>
+        <div class="seg-label">VOICES</div>
+        <div class="seg" data-help="<b>VOICES</b> - POLY plays chords. MONO plays one note at a time. LEGATO slides between overlapping notes.">
+          <div class="on">POLY</div><div>MONO</div><div>LEGATO</div>
+        </div>
+        <div class="row" id="playKnobs" style="margin-top:10px"></div>
+      </div>
+    </div>
+
+    <!-- OPERATORS page -->
+    <div class="page" id="ops"></div>
+
+    <!-- PSG page -->
+    <div class="page" id="psg">
+      <div class="win">
+        <h3>SQUARE LAYER</h3>
+        <div class="seg-label">MODE</div>
+        <div class="seg" data-help="<b>PSG MODE</b> - UNISON doubles your notes with square waves. ARPEGGIO cycles through held notes like classic chiptunes.">
+          <div>OFF</div><div class="on">UNISON</div><div>ARPEGGIO</div>
+        </div>
+        <div class="row" id="psgKnobs" style="margin-top:10px"></div>
+      </div>
+      <div class="win">
+        <h3>ENVELOPE (60 STEPS / SEC)</h3>
+        <div class="row" id="psgEnv"></div>
+        <h3 style="margin-top:12px">NOISE</h3>
+        <div class="row" id="noiseKnobs"></div>
+      </div>
+    </div>
+
+    <!-- DRUMS page -->
+    <div class="page" id="drums">
+      <div class="win">
+        <h3>DRUM KIT - MIDI CH 10</h3>
+        <div class="pads" id="pads"></div>
+      </div>
+      <div class="win">
+        <h3>KIT</h3>
+        <div class="led-btn on" data-help="<b>DRUMS ON</b> - Gives FM channel 6 to the drum sampler, like the games did. FM then has 5 voices.">
+          <i></i> DRUMS ON
+        </div>
+        <div class="row" id="drumKnobs" style="margin-top:10px"></div>
+        <div class="legend" style="margin-top:10px"><span class="y">YELLOW</span> = 8-BIT SAMPLE (DAC)<br><span class="c">CYAN</span> = PSG NOISE</div>
+      </div>
+    </div>
+
+    <!-- FX page -->
+    <div class="page" id="fx">
+      <div class="win"><h3>CHORUS</h3><div class="led-btn" data-help="<b>CHORUS</b> - Thickens the sound with slight pitch wobble."><i></i> ON</div><div class="row" id="chorusKnobs" style="margin-top:10px"></div></div>
+      <div class="win"><h3>ECHO</h3><div class="led-btn on" data-help="<b>ECHO</b> - Repeats synced to your song's tempo. Each repeat gets darker."><i></i> ON</div><div class="row" id="echoKnobs" style="margin-top:10px"></div></div>
+      <div class="win"><h3>REVERB</h3><div class="led-btn" data-help="<b>REVERB</b> - Places the sound in a room or hall."><i></i> ON</div><div class="row" id="reverbKnobs" style="margin-top:10px"></div></div>
+    </div>
+
+    <!-- Bottom -->
+    <div class="bottom">
+      <div class="textbox" id="help"><b>WELCOME!</b> - Hover over anything to learn what it does. Drag knobs up/down. Double-click resets.</div>
+      <div class="screen" data-help="<b>SCOPE</b> - The sound's waveform, live. The green lights show which of the 6 chip channels are playing.">
+        <div class="tag">OUTPUT</div>
+        <svg viewBox="0 0 230 180" preserveAspectRatio="none"><polyline id="scope" fill="none" stroke="#3dff7a" stroke-width="2"/></svg>
+        <div class="voices" id="voiceLeds"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      </div>
+      <div class="play">
+        <div class="wheels" data-help="<b>BEND / MOD</b> - Pitch bend springs back. MOD adds vibrato.">
+          <div class="wheel"><div class="slot"><i></i></div><span>BEND</span></div>
+          <div class="wheel"><div class="slot"><i style="top:75%"></i></div><span>MOD</span></div>
+        </div>
+        <div class="octave" data-help="<b>OCTAVE</b> - Shift the keyboard up or down. Keys Z / X do the same.">
+          <div class="ob" id="octUp">OCT+</div><div class="ov" id="octVal">OCT 0</div><div class="ob" id="octDn">OCT-</div>
+        </div>
+        <div class="keys" id="keys" data-help="<b>KEYBOARD</b> - Click to play, or use A W S E D F T G Y H U J K on your computer keyboard."></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <span>Mockup only: drag knobs, click tabs, algorithms, pads and keys.</span>
+    <label><input type="checkbox" id="crt" checked> CRT scanlines</label>
+  </div>
+</div>
+
+<script>
+(function () {
+  const help = document.getElementById("help");
+  const plugin = document.getElementById("plugin");
+
+  /* ---------- hover help, game-dialog style ---------- */
+  let typing;
+  function say(html) {
+    clearInterval(typing);
+    const tmp = document.createElement("div"); tmp.innerHTML = html;
+    const full = html; let i = 0;
+    const plain = tmp.textContent;
+    help.innerHTML = "";
+    typing = setInterval(() => {
+      i += 3;
+      if (i >= plain.length) { help.innerHTML = full; clearInterval(typing); return; }
+      help.textContent = plain.slice(0, i);
+    }, 12);
+  }
+  plugin.addEventListener("mouseover", e => {
+    const el = e.target.closest("[data-help]");
+    if (el && el.dataset.help !== help.dataset.last) { help.dataset.last = el.dataset.help; say(el.dataset.help); }
+  });
+
+  /* ---------- knobs ---------- */
+  const SEGMENTS = 21;
+  function knobSVG(t) {
+    let s = '<svg viewBox="0 0 52 52">';
+    for (let i = 0; i < SEGMENTS; i++) {
+      const a = (-135 + i * (270 / (SEGMENTS - 1))) * Math.PI / 180;
+      const x1 = 26 + Math.sin(a) * 19, y1 = 26 - Math.cos(a) * 19;
+      const x2 = 26 + Math.sin(a) * 24, y2 = 26 - Math.cos(a) * 24;
+      const lit = i / (SEGMENTS - 1) <= t;
+      s += `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${lit ? '#29d3ff' : '#0d2b55'}" stroke-width="3" stroke-linecap="square"${lit ? ' style="filter:drop-shadow(0 0 2px #29d3ff)"' : ''}/>`;
+    }
+    const a = (-135 + t * 270) * Math.PI / 180;
+    s += '<circle cx="26" cy="26" r="15" fill="url(#kg)" stroke="#000" stroke-width="2"/>';
+    s += '<defs><radialGradient id="kg" cx="40%" cy="35%"><stop offset="0" stop-color="#4a4f63"/><stop offset="1" stop-color="#0d0e14"/></radialGradient></defs>';
+    s += `<line x1="26" y1="26" x2="${(26 + Math.sin(a) * 12).toFixed(1)}" y2="${(26 - Math.cos(a) * 12).toFixed(1)}" stroke="#ffd400" stroke-width="3" stroke-linecap="square"/>`;
+    return s + "</svg>";
+  }
+  function makeKnob(parent, spec) {
+    const k = document.createElement("div");
+    k.className = "knob" + (spec.small ? " small" : "");
+    k.dataset.help = `<b>${spec.label}</b> - ${spec.help}`;
+    let v = spec.value;
+    const range = spec.max - spec.min;
+    function render() {
+      k.innerHTML = `<div class="k-label">${spec.label}</div>${knobSVG((v - spec.min) / range)}<div class="k-value">${spec.fmt ? spec.fmt(v) : Math.round(v)}</div>`;
+    }
+    render();
+    let startY, startV;
+    k.addEventListener("pointerdown", e => { startY = e.clientY; startV = v; k.setPointerCapture(e.pointerId); });
+    k.addEventListener("pointermove", e => {
+      if (startY === undefined) return;
+      const speed = e.shiftKey ? 0.1 : 1;
+      v = Math.max(spec.min, Math.min(spec.max, startV + (startY - e.clientY) * range / 150 * speed));
+      if (spec.step) v = Math.round(v / spec.step) * spec.step;
+      render();
+    });
+    k.addEventListener("pointerup", () => { startY = undefined; });
+    k.addEventListener("dblclick", () => { v = spec.value; render(); });
+    k.addEventListener("wheel", e => { e.preventDefault(); v = Math.max(spec.min, Math.min(spec.max, v - Math.sign(e.deltaY) * (spec.step || range / 50))); render(); });
+    k.setLabel = (label, helpText) => { spec.label = label; spec.help = helpText; k.dataset.help = `<b>${label}</b> - ${helpText}`; render(); };
+    parent.appendChild(k);
+    return k;
+  }
+  const pct = v => Math.round(v) + "%";
+  const ms = v => Math.round(v) + "MS";
+  const add = (id, list) => list.forEach(s => makeKnob(document.getElementById(id), s));
+
+  add("macros", [
+    { label: "BRIGHTNESS", min: 0, max: 100, value: 55, fmt: pct, help: "Raises or lowers every modulator at once. More = buzzier, brighter." },
+    { label: "ATTACK", min: 0, max: 100, value: 0, fmt: pct, help: "How fast notes fade in. 0 = instant." },
+    { label: "DECAY", min: 0, max: 100, value: 40, fmt: pct, help: "How quickly the sound drops after the hit." },
+    { label: "RELEASE", min: 0, max: 100, value: 35, fmt: pct, help: "How long notes ring after you let go." },
+    { label: "FEEDBACK", min: 0, max: 7, value: 4, step: 1, help: "Operator 1 feeds itself: adds grit and a saw-like edge." },
+    { label: "VIBRATO", min: 0, max: 100, value: 0, fmt: pct, help: "Pitch wobble. The mod wheel adds more." },
+  ]);
+  add("consoleKnobs", [
+    { label: "FILTER", min: 1000, max: 20000, value: 3680, small: true, fmt: v => (v / 1000).toFixed(1) + "K", help: "The console's warm low-pass. Model 1 is about 3.7 kHz." },
+    { label: "VOLUME", min: -24, max: 12, value: 0, small: true, fmt: v => (v > 0 ? "+" : "") + v.toFixed(1) + "DB", help: "Master output level." },
+  ]);
+  add("playKnobs", [
+    { label: "GLIDE", min: 0, max: 2000, value: 0, fmt: v => v < 1 ? "OFF" : ms(v), help: "Slides between notes in MONO or LEGATO." },
+    { label: "UNISON", min: 1, max: 3, value: 1, step: 1, fmt: v => v < 2 ? "OFF" : v + "X", help: "Stacks 2-3 detuned copies for a huge sound (fewer chords)." },
+    { label: "DETUNE", min: 0, max: 50, value: 12, fmt: v => Math.round(v) + "CT", help: "How far apart the unison copies are." },
+    { label: "VELOCITY", min: 0, max: 100, value: 70, fmt: pct, help: "How much playing harder makes it louder. 0 = like the real console." },
+  ]);
+  add("psgKnobs", [
+    { label: "LEVEL", min: 0, max: 15, value: 12, step: 1, help: "Volume of the square layer." },
+    { label: "OCTAVE", min: -2, max: 2, value: 0, step: 1, fmt: v => (v > 0 ? "+" : "") + v, help: "Shift the squares up or down." },
+    { label: "ARP SPEED", min: 1, max: 8, value: 2, step: 1, fmt: v => Math.round(v * 16.7) + "MS", help: "How fast the arpeggio steps." },
+  ]);
+  add("psgEnv", [
+    { label: "ATTACK", min: 0, max: 15, value: 0, step: 1, small: true, help: "Frames per volume step on the way up." },
+    { label: "DECAY", min: 0, max: 15, value: 2, step: 1, small: true, help: "Frames per step down to sustain." },
+    { label: "SUSTAIN", min: 0, max: 15, value: 12, step: 1, small: true, help: "Volume while held." },
+    { label: "RELEASE", min: 0, max: 15, value: 2, step: 1, small: true, help: "Frames per step after you let go." },
+  ]);
+  add("noiseKnobs", [
+    { label: "NOISE", min: 0, max: 15, value: 0, step: 1, small: true, help: "A constant noise layer. Usually off." },
+    { label: "RATE", min: 0, max: 3, value: 1, step: 1, small: true, fmt: v => ["HIGH", "MID", "LOW", "TONE3"][Math.round(v)], help: "Noise pitch." },
+  ]);
+  add("drumKnobs", [{ label: "DRUM LEVEL", min: 0, max: 100, value: 80, fmt: pct, help: "Volume of the kit." }]);
+  add("chorusKnobs", [
+    { label: "RATE", min: 0.1, max: 5, value: 0.8, small: true, fmt: v => v.toFixed(1) + "HZ", help: "Wobble speed." },
+    { label: "DEPTH", min: 0, max: 100, value: 35, small: true, fmt: pct, help: "Wobble amount." },
+    { label: "MIX", min: 0, max: 100, value: 50, small: true, fmt: pct, help: "How much chorus." },
+  ]);
+  add("echoKnobs", [
+    { label: "TIME", min: 0, max: 5, value: 2, step: 1, small: true, fmt: v => ["1/4", "1/8", "1/8.", "1/16", "1/4.", "1/8T"][Math.round(v)], help: "Echo length, synced to tempo." },
+    { label: "FEEDBACK", min: 0, max: 95, value: 35, small: true, fmt: pct, help: "How many repeats." },
+    { label: "MIX", min: 0, max: 100, value: 25, small: true, fmt: pct, help: "How loud the echoes are." },
+  ]);
+  add("reverbKnobs", [
+    { label: "SIZE", min: 0, max: 100, value: 50, small: true, fmt: pct, help: "Room size." },
+    { label: "DAMP", min: 0, max: 100, value: 50, small: true, fmt: pct, help: "Darker tail." },
+    { label: "MIX", min: 0, max: 100, value: 25, small: true, fmt: pct, help: "How much reverb." },
+  ]);
+
+  /* ---------- algorithms ---------- */
+  const EDGES = [
+    [[0,1],[1,2],[2,3],[3,4]], [[0,2],[1,2],[2,3],[3,4]], [[0,3],[1,2],[2,3],[3,4]], [[0,1],[1,3],[2,3],[3,4]],
+    [[0,1],[1,4],[2,3],[3,4]], [[0,1],[0,2],[0,3],[1,4],[2,4],[3,4]], [[0,1],[1,4],[2,4],[3,4]], [[0,4],[1,4],[2,4],[3,4]],
+  ];
+  const CARRIERS = [[3],[3],[3],[3],[1,3],[1,2,3],[1,2,3],[0,1,2,3]];
+  const ALGO_TEXT = [
+    "4 IN A CHAIN: one sound, richest tone. Good for bass and leads.",
+    "2 MODULATORS MERGE, then chain. Thick, complex tone.",
+    "TWO PATHS INTO OP4. Bright and full.",
+    "TWO PATHS INTO OP4, short branch. Punchy.",
+    "TWO PAIRS: two separate sounds layered. E-pianos, brass.",
+    "ONE MODULATOR DRIVES THREE: bells and organ-like stacks.",
+    "ONE PAIR + TWO SINES: soft, airy layers.",
+    "4 SINE WAVES ADDED: organ drawbars.",
+  ];
+  function algoSVG(a) {
+    const pos = [[16,14],[40,14],[64,14],[88,14],[112,40]];
+    // Lay out by depth for readability.
+    const p = [[14,12],[14,30],[14,48],[52,30],[96,30]];
+    let s = '<svg viewBox="0 0 120 60">';
+    for (const [f, t] of EDGES[a]) {
+      const A = layout(a)[f], B = layout(a)[t];
+      s += `<line x1="${A[0]+9}" y1="${A[1]}" x2="${B[0]-9}" y2="${B[1]}" stroke="#29d3ff" stroke-width="2"/>`;
+    }
+    layout(a).forEach((q, i) => {
+      if (i === 4) { s += `<rect x="${q[0]-10}" y="${q[1]-6}" width="20" height="12" fill="#3dff7a"/><text x="${q[0]}" y="${q[1]+3}" font-size="7" text-anchor="middle" font-family="Press Start 2P" fill="#111">OUT</text>`; return; }
+      const car = CARRIERS[a].includes(i);
+      s += `<rect x="${q[0]-8}" y="${q[1]-7}" width="16" height="14" fill="${car ? '#ffd400' : '#0d2b55'}" stroke="#fff" stroke-width="1"/>`;
+      s += `<text x="${q[0]}" y="${q[1]+4}" font-size="8" text-anchor="middle" font-family="Press Start 2P" fill="${car ? '#111' : '#fff'}">${i+1}</text>`;
+    });
+    return s + "</svg>";
+  }
+  function layout(a) {
+    // depth (column) of each operator for this algorithm, simple and readable
+    const cols = [[0,1,2,3],[0,0,1,2],[0,0,1,2],[0,1,0,2],[0,1,0,1],[0,1,1,1],[0,1,1,1],[0,0,0,0]][a];
+    const maxc = Math.max(...cols);
+    const xs = c => 14 + c * (maxc ? 70 / maxc : 0);
+    const groups = {};
+    cols.forEach((c, i) => (groups[c] = groups[c] || []).push(i));
+    const out = [];
+    Object.entries(groups).forEach(([c, ops]) => ops.forEach((op, k) => {
+      out[op] = [xs(+c), 30 + (k - (ops.length - 1) / 2) * 15];
+    }));
+    out[4] = [108, 30];
+    return out;
+  }
+  const algos = document.getElementById("algos");
+  let currentAlgo = 4;
+  for (let a = 0; a < 8; a++) {
+    const d = document.createElement("div");
+    d.className = "algo" + (a === currentAlgo ? " on" : "");
+    d.dataset.help = `<b>ALGORITHM ${a}</b> - ${ALGO_TEXT[a]} Yellow boxes are what you hear.`;
+    d.innerHTML = algoSVG(a) + `<div class="num">ALG ${a}</div>`;
+    d.onclick = () => { currentAlgo = a; document.querySelectorAll(".algo").forEach((x, i) => x.classList.toggle("on", i === a)); updateExplain(); buildOps(); };
+    algos.appendChild(d);
+  }
+  function updateExplain() { document.getElementById("algoExplain").textContent = ALGO_TEXT[currentAlgo]; }
+  updateExplain();
+
+  /* ---------- operators ---------- */
+  function envSVG(ar, dr, sl, rr) {
+    const pts = [[0,50],[Math.max(4, 40 - ar), 4],[40 - ar + 10 + dr, 4 + sl * 2.6],[150, 4 + sl * 2.6],[150 + 20 + rr, 50]];
+    return `<svg viewBox="0 0 200 54" preserveAspectRatio="none"><polyline points="${pts.map(p => p.join(",")).join(" ")}" fill="rgba(41,211,255,.12)" stroke="#29d3ff" stroke-width="2"/></svg>`;
+  }
+  function buildOps() {
+    const ops = document.getElementById("ops");
+    ops.innerHTML = "";
+    for (let i = 0; i < 4; i++) {
+      const car = CARRIERS[currentAlgo].includes(i);
+      const w = document.createElement("div");
+      w.className = "win";
+      w.innerHTML = `<div class="op-head"><h3>OP${i+1}</h3><span class="badge ${car ? 'car' : 'mod'}" data-help="${car ? '<b>CARRIER</b> - You hear this operator directly. Its level is its VOLUME.' : '<b>MODULATOR</b> - You don\'t hear this one; it shapes the tone of another. Its level is BRIGHTNESS.'}">${car ? 'YOU HEAR IT' : 'SHAPES TONE'}</span></div>`;
+      const row1 = document.createElement("div"); row1.className = "row";
+      w.appendChild(row1);
+      makeKnob(row1, { label: "RATIO", min: 0, max: 15, value: i === 0 ? 2 : 1, step: 1, small: true, fmt: v => v < 1 ? "X0.5" : "X" + v, help: "Pitch of this operator vs the note. Whole numbers sound musical; high ones sound bell-like." });
+      makeKnob(row1, { label: car ? "VOLUME" : "BRIGHT", min: 0, max: 127, value: car ? 120 : 90, small: true, help: car ? "How loud this operator is." : "How strongly this operator colours the sound." });
+      makeKnob(row1, { label: "DETUNE", min: -3, max: 3, value: 0, step: 1, small: true, fmt: v => (v > 0 ? "+" : "") + v, help: "A slight pitch offset for chorus-like beating." });
+      const env = document.createElement("div"); env.className = "env"; env.dataset.help = "<b>ENVELOPE</b> - The shape of the sound over time. Drag points in the real version.";
+      env.innerHTML = envSVG(i === 1 ? 6 : 0, 20, i % 2 ? 4 : 8, 10);
+      w.appendChild(env);
+      const row2 = document.createElement("div"); row2.className = "row";
+      w.appendChild(row2);
+      [["ATK", "Attack: how fast it rises."], ["DEC", "Decay: how fast it drops."], ["SUS", "Sustain: level while held."], ["REL", "Release: fade after letting go."]].forEach(([l, h], j) =>
+        makeKnob(row2, { label: l, min: 0, max: 31, value: [31, 12, 8, 10][j], step: 1, small: true, help: h }));
+      const tg = document.createElement("div"); tg.className = "op-toggles";
+      tg.innerHTML = `<span class="chip-toggle" data-help="<b>KEY SCALE</b> - Higher notes decay faster, like real instruments.">KEY SCL</span><span class="chip-toggle" data-help="<b>TREMOLO</b> - Lets the LFO pulse this operator's volume.">TREMOLO</span><span class="chip-toggle" data-help="<b>SSG-EG</b> - The chip's looping envelope: wobbling, evolving sounds.">SSG-EG</span>`;
+      tg.querySelectorAll(".chip-toggle").forEach(t => t.onclick = () => t.classList.toggle("on"));
+      w.appendChild(tg);
+      ops.appendChild(w);
+    }
+  }
+  buildOps();
+
+  /* ---------- drums ---------- */
+  const PADS = [["KICK","C2","dac"],["SNARE","D2","dac"],["CLAP","D#2","dac"],["RIM","C#2","dac"],["SNARE 2","E2","dac"],["CL HAT","F#2","psg"],
+                ["OPEN HAT","A#2","psg"],["PEDAL HAT","G#2","psg"],["CRASH","C#3","psg"],["RIDE","D#3","psg"],["LO TOM","F2","dac"],["HI TOM","D3","dac"]];
+  const padsEl = document.getElementById("pads");
+  PADS.forEach(([n, k, t]) => {
+    const p = document.createElement("div");
+    p.className = "pad " + t;
+    p.dataset.help = `<b>${n}</b> - ${t === "dac" ? "8-bit sample through the FM chip's DAC." : "PSG noise channel."} Plays on MIDI note ${k}.`;
+    p.innerHTML = `<b>${n}</b><small>${k}</small>`;
+    p.onpointerdown = () => { p.classList.add("hit"); setTimeout(() => p.classList.remove("hit"), 120); };
+    padsEl.appendChild(p);
+  });
+
+  /* ---------- tabs, toggles, segments ---------- */
+  document.querySelectorAll(".tab").forEach(t => t.onclick = () => {
+    document.querySelectorAll(".tab").forEach(x => x.classList.toggle("active", x === t));
+    document.querySelectorAll(".page").forEach(p => p.classList.toggle("active", p.id === t.dataset.page));
+  });
+  document.querySelectorAll(".seg").forEach(s => s.querySelectorAll("div").forEach(d => d.onclick = () => {
+    s.querySelectorAll("div").forEach(x => x.classList.toggle("on", x === d));
+  }));
+  document.querySelectorAll(".led-btn").forEach(b => b.onclick = () => b.classList.toggle("on"));
+  document.getElementById("crt").onchange = e => plugin.classList.toggle("crt", e.target.checked);
+
+  /* ---------- presets ---------- */
+  const PRESETS = [["BASS","SLAP BASS"],["BASS","ACID BASS"],["LEAD","HERO LEAD"],["KEYS","TINE E.PIANO"],["BELLS & MALLETS","TUBULAR BELL"],
+                   ["BRASS & WINDS","BRASS SECTION"],["STRINGS & PADS","SSG SWEEP"],["GUITAR","DISTORTION GUITAR"],["CHIP","CHIP ARPEGGIO"]];
+  let pi = 0;
+  function showPreset() { document.getElementById("pcat").textContent = PRESETS[pi][0]; document.getElementById("pname").textContent = PRESETS[pi][1]; }
+  document.getElementById("prev").onclick = () => { pi = (pi + PRESETS.length - 1) % PRESETS.length; showPreset(); };
+  document.getElementById("next").onclick = () => { pi = (pi + 1) % PRESETS.length; showPreset(); };
+
+  /* ---------- keyboard ---------- */
+  const keys = document.getElementById("keys");
+  const WHITE = 21, w = 100 / WHITE;
+  const leds = [...document.querySelectorAll("#voiceLeds i")];
+  let held = 0;
+  for (let i = 0; i < WHITE; i++) {
+    const k = document.createElement("div"); k.className = "w";
+    k.style.left = (i * w) + "%"; k.style.width = w + "%";
+    keys.appendChild(k);
+    if ([0,1,3,4,5].includes(i % 7) && i < WHITE - 1) {
+      const b = document.createElement("div"); b.className = "b";
+      b.style.left = ((i + 0.68) * w) + "%"; b.style.width = (w * 0.64) + "%";
+      keys.appendChild(b);
+    }
+  }
+  keys.querySelectorAll(".w,.b").forEach(k => {
+    k.onpointerdown = () => { k.classList.add("down"); held++; leds.forEach((l, i) => l.classList.toggle("on", i < held)); };
+    k.onpointerup = k.onpointerleave = () => { if (k.classList.contains("down")) { k.classList.remove("down"); held = Math.max(0, held - 1); leds.forEach((l, i) => l.classList.toggle("on", i < held)); } };
+  });
+  let oct = 0;
+  const ov = document.getElementById("octVal");
+  document.getElementById("octUp").onclick = () => { oct = Math.min(3, oct + 1); ov.textContent = "OCT " + (oct > 0 ? "+" : "") + oct; };
+  document.getElementById("octDn").onclick = () => { oct = Math.max(-3, oct - 1); ov.textContent = "OCT " + (oct > 0 ? "+" : "") + oct; };
+
+  /* ---------- fake scope ---------- */
+  const scope = document.getElementById("scope");
+  let ph = 0;
+  (function tick() {
+    ph += 0.12;
+    const amp = held ? 55 : 6;
+    let pts = "";
+    for (let x = 0; x <= 230; x += 4) {
+      const y = 90 + amp * (Math.sin(x * 0.09 + ph) * 0.7 + Math.sin(x * 0.27 + ph * 1.3) * 0.3);
+      pts += `${x},${y.toFixed(1)} `;
+    }
+    scope.setAttribute("points", pts);
+    requestAnimationFrame(tick);
+  })();
+})();
+</script>
+</body>
+</html>
