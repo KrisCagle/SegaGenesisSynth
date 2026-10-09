@@ -45,6 +45,16 @@ public:
     const juce::String getProgramName (int index) override;
     void changeProgramName (int, const juce::String&) override {}
 
+    // ---- Telemetry for the editor (written on the audio thread, read on the
+    // message thread; lock-free) ----
+
+    // Bit n set = chip channel n is sounding.
+    uint8_t getActiveVoices() const { return activeVoices.load (std::memory_order_relaxed); }
+
+    // Copies up to `max` of the newest output samples (mono, every 2nd
+    // sample) into `dest`; returns how many were copied.
+    int readScope (float* dest, int max);
+
     // Community patch files (.tfi / .vgi / .dmp in, .tfi out). Message
     // thread only. Return an empty string on success, else the reason.
     juce::String importPatchFile (const juce::File& file);
@@ -85,6 +95,12 @@ private:
     std::vector<float> scratchLeft, scratchRight;
 
     int currentProgram = 0;
+
+    std::atomic<uint8_t> activeVoices { 0 };
+    static constexpr int kScopeSize = 4096;
+    juce::AbstractFifo scopeFifo { kScopeSize };
+    std::array<float, kScopeSize> scopeBuffer {};
+    int scopeDecimate = 0;
 
     // The note each incoming (channel, note) actually started after the
     // Octave shift, so its note-off releases the same note even if the

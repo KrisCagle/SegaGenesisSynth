@@ -779,6 +779,72 @@ static void test_presets_are_balanced(void) {
     CHECK(ok, "every preset plays within 2 dB of the target loudness (switching presets doesn't jump in volume)");
 }
 
+/* ---- Quick Sound macros ---- */
+
+static void test_macros(void) {
+    GenisysPatch p = genisys_default_patch(); /* algorithm 0: OP1-3 modulate, OP4 carries */
+    uint32_t mod_before, car_before, ar_before;
+
+    p.op[3].ar = 20;
+    start(48000.0, &p);
+    genisys_engine_note_on(&g_engine, 60, 127);
+    mod_before = g_engine.chip.channel[0].op[0].tl;
+    car_before = g_engine.chip.channel[0].op[3].tl;
+    ar_before = g_engine.chip.channel[0].op[3].ar;
+
+    p.macro_bright = 100;
+    p.macro_attack = 100;
+    genisys_engine_set_patch(&g_engine, &p);
+    CHECK(g_engine.chip.channel[0].op[0].tl < mod_before, "BRIGHT up lowers modulator levels (more modulation)");
+    CHECK(g_engine.chip.channel[0].op[3].tl == car_before, "BRIGHT leaves carriers alone (tone, not volume)");
+    CHECK(g_engine.chip.channel[0].op[3].ar < ar_before, "ATTACK up slows the attack");
+
+    p.macro_bright = 0;
+    p.macro_attack = 0;
+    genisys_engine_set_patch(&g_engine, &p);
+    CHECK(g_engine.chip.channel[0].op[0].tl == mod_before && g_engine.chip.channel[0].op[3].ar == ar_before,
+          "macros at 0 give back the exact programmed sound");
+}
+
+static void test_vibrato_macro(void) {
+    double wobble_on;
+    {
+        GenisysPatch q = sine_patch();
+        int i, frames = 48000, last = -1;
+        double shortest = 1e9, longest = 0.0;
+        q.vibrato_depth = 50;
+        q.vibrato_amount = 100;
+        start(48000.0, &q);
+        genisys_engine_note_on(&g_engine, 69, 127);
+        genisys_engine_render(&g_engine, g_left, g_right, frames);
+        for (i = 4800; i < frames - 1; i++) {
+            if (g_left[i] <= 0.0f && g_left[i + 1] > 0.0f) {
+                if (last >= 0) {
+                    double period = i - last;
+                    if (period < shortest) shortest = period;
+                    if (period > longest) longest = period;
+                }
+                last = i;
+            }
+        }
+        wobble_on = longest / shortest;
+    }
+    CHECK(wobble_on > 1.04, "VIBRATO macro wobbles the pitch without touching the mod wheel");
+}
+
+static void test_active_voices(void) {
+    GenisysPatch p = sine_patch();
+    start(48000.0, &p);
+    CHECK(genisys_engine_active_voices(&g_engine) == 0, "no voices lit when silent");
+    genisys_engine_note_on(&g_engine, 60, 100);
+    genisys_engine_note_on(&g_engine, 64, 100);
+    CHECK(genisys_engine_active_voices(&g_engine) == 0x03, "two held notes light two voices");
+    genisys_engine_note_off(&g_engine, 60);
+    genisys_engine_note_off(&g_engine, 64);
+    genisys_engine_render(&g_engine, g_left, g_right, 48000);
+    CHECK(genisys_engine_active_voices(&g_engine) == 0, "lights go out once the release tails end");
+}
+
 int main(void) {
     genisys_engine_global_init();
 
@@ -816,6 +882,9 @@ int main(void) {
     test_fm_psg_balance();
     test_preset_library_shape();
     test_presets_are_balanced();
+    test_macros();
+    test_vibrato_macro();
+    test_active_voices();
 
     if (g_failures == 0) {
         printf("\nAll tests passed.\n");
