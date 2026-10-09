@@ -67,6 +67,8 @@ namespace
     juce::String semitoneLabel (int v) { return juce::String (v) + (v == 1 ? " semitone" : " semitones"); }
     juce::String centsLabel (int v) { return juce::String (v) + " cents"; }
     juce::String tenthsHzLabel (int v) { return juce::String (v / 10.0, 1) + " Hz"; }
+    juce::String msLabel (int v) { return v == 0 ? juce::String ("Off") : juce::String (v) + " ms"; }
+    juce::String unisonLabel (int v) { return v == 1 ? juce::String ("Off") : juce::String (v) + " channels"; }
 
     // PSG envelopes step once per 60 Hz frame (~16.7 ms).
     juce::String framesPerStepLabel (int v)
@@ -108,6 +110,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     layout.add (intParam ("bend_range", "Pitch Bend Range", 0, 24, 2, semitoneLabel));
     layout.add (intParam ("vibrato_depth", "Mod Wheel Vibrato Depth", 0, 100, def.vibrato_depth, centsLabel));
     layout.add (intParam ("vibrato_rate", "Vibrato Speed", 10, 150, def.vibrato_rate, tenthsHzLabel));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (
+        juce::ParameterID { "voice_mode", kVersion }, "Voice Mode",
+        juce::StringArray { "Poly", "Mono", "Legato" }, def.voice_mode));
+    layout.add (intParam ("glide_time", "Glide (Mono/Legato)", 0, 2000, def.glide_time, msLabel));
+    layout.add (intParam ("unison", "Unison", 1, 3, def.unison, unisonLabel));
+    layout.add (intParam ("unison_detune", "Unison Detune", 0, 50, def.unison_detune, centsLabel));
+    layout.add (boolParam ("unison_stereo", "Unison Stereo", def.unison_stereo != 0));
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "master_gain", kVersion }, "Master Volume",
         juce::NormalisableRange<float> (-24.0f, 12.0f, 0.1f), 0.0f,
@@ -182,6 +191,9 @@ Snapshot::Snapshot (juce::AudioProcessorValueTreeState& state)
       velocitySens (raw (state, "velocity_sens")), masterGain (raw (state, "master_gain")),
       octaveShift (raw (state, "octave")), bendRangeSemis (raw (state, "bend_range")),
       vibratoDepth (raw (state, "vibrato_depth")), vibratoRate (raw (state, "vibrato_rate")),
+      voiceMode (raw (state, "voice_mode")), glideTime (raw (state, "glide_time")),
+      unison (raw (state, "unison")), unisonDetune (raw (state, "unison_detune")),
+      unisonStereo (raw (state, "unison_stereo")),
       psgLevel (raw (state, "psg_level")), noiseOn (raw (state, "noise_on")),
       noiseWhite (raw (state, "noise_white")), noiseRate (raw (state, "noise_rate")),
       noiseVolume (raw (state, "noise_volume")),
@@ -223,6 +235,11 @@ GenisysPatch Snapshot::readPatch() const
     patch.velocity_sens = asInt (velocitySens);
     patch.vibrato_depth = asInt (vibratoDepth);
     patch.vibrato_rate = asInt (vibratoRate);
+    patch.voice_mode = asInt (voiceMode);
+    patch.glide_time = asInt (glideTime);
+    patch.unison = asInt (unison);
+    patch.unison_detune = asInt (unisonDetune);
+    patch.unison_stereo = asInt (unisonStereo);
 
     for (size_t op = 0; op < 4; ++op)
     {
@@ -288,6 +305,11 @@ void applyPatch (juce::AudioProcessorValueTreeState& state, const GenisysPatch& 
     set ("velocity_sens", patch.velocity_sens);
     set ("vibrato_depth", patch.vibrato_depth);
     set ("vibrato_rate", patch.vibrato_rate);
+    set ("voice_mode", patch.voice_mode);
+    set ("glide_time", patch.glide_time);
+    set ("unison", patch.unison);
+    set ("unison_detune", patch.unison_detune);
+    set ("unison_stereo", patch.unison_stereo);
 
     for (int op = 0; op < 4; ++op)
     {

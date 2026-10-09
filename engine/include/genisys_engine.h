@@ -29,7 +29,13 @@ extern "C" {
 
 #define GENISYS_NUM_VOICES 6 /* one per YM2612 channel: the hardware limit */
 
-/* ---- Patch: every field is a real register value, in register units ---- */
+typedef enum {
+    GENISYS_MODE_POLY = 0,   /* up to 6 notes (fewer with unison or drums) */
+    GENISYS_MODE_MONO = 1,   /* one note; each new note restarts the envelope */
+    GENISYS_MODE_LEGATO = 2  /* one note; overlapping notes only change pitch */
+} GenisysVoiceMode;
+
+/* ---- Patch: register values, plus the engine's own performance settings ---- */
 
 typedef struct {
     int mul;        /* 0-15 frequency multiplier (0 = x0.5) */
@@ -56,6 +62,11 @@ typedef struct {
     int velocity_sens; /* 0-100 %: 0 = every note equally loud (hardware-authentic) */
     int vibrato_depth; /* 0-100 cents at full mod wheel (software vibrato, as game drivers did) */
     int vibrato_rate;  /* tenths of a Hz, 10-150 (1.0-15.0 Hz) */
+    int voice_mode;    /* GenisysVoiceMode */
+    int glide_time;    /* ms, 0-2000: portamento in Mono/Legato (0 = off) */
+    int unison;        /* 1-3 chip channels per note */
+    int unison_detune; /* cents, 0-50: spread between unison channels */
+    int unison_stereo; /* 0/1: pan unison channels hard left/right (real chip panning) */
     GenisysOperatorParams op[4]; /* OP1..OP4 */
 } GenisysPatch;
 
@@ -142,6 +153,8 @@ typedef struct {
     int velocity;  /* 1-127 */
     uint32_t age;  /* engine event counter at the last note-on/off, for oldest-first choices */
     int sustained; /* key is up but the sustain pedal is holding the note */
+    double detune; /* semitones: this voice's unison offset */
+    uint8_t pan;   /* $B4 pan bits: 0xC0 both, 0x80 left, 0x40 right */
     int last_block, last_fnum; /* frequency registers last written, to skip redundant writes */
 } GenisysVoice;
 
@@ -190,6 +203,13 @@ typedef struct {
     double vibrato_phase;  /* 0-1 */
     int sustain_pedal;
     int control_counter;
+
+    /* Mono/Legato: held keys (last-note priority) and the gliding pitch. */
+    int note_stack[16];
+    int stack_count;
+    double mono_pitch, mono_target, glide_step;
+    int mono_has_pitch;
+    int mono_velocity;
     float lp_coeff;            /* low-pass pole for console.filter_hz */
     float lp_l, lp_r;
 

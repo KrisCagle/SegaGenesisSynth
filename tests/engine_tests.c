@@ -597,6 +597,95 @@ static void test_psg_follows_bend(void) {
     CHECK(g_engine.psg.tone_reg[0] == psg_divider(880.0), "the PSG layer follows pitch bend");
 }
 
+/* ---- Voice modes: unison, mono, legato, glide ---- */
+
+static int held_voices(void) {
+    int v, n = 0;
+    for (v = 0; v < GENISYS_NUM_VOICES; v++) if (g_engine.voice[v].state == GENISYS_VOICE_HELD) n++;
+    return n;
+}
+
+static double voice_hz(int v) {
+    return g_engine.voice[v].last_fnum * YM2612_SAMPLE_HZ * ldexp(1.0, g_engine.voice[v].last_block - 1) / 1048576.0;
+}
+
+static void test_unison(void) {
+    GenisysPatch p = sine_patch();
+    int v, a = -1, b = -1;
+
+    p.unison = 2;
+    start(48000.0, &p);
+    genisys_engine_note_on(&g_engine, 69, 100);
+    for (v = 0; v < GENISYS_NUM_VOICES; v++) {
+        if (g_engine.voice[v].state != GENISYS_VOICE_HELD) continue;
+        if (a < 0) a = v; else b = v;
+    }
+    CHECK(held_voices() == 2, "unison 2: one key plays two chip channels");
+    CHECK(a >= 0 && b >= 0 && voice_hz(a) != voice_hz(b), "unison 2: the two channels are detuned apart");
+    CHECK(a >= 0 && b >= 0 && g_engine.chip.channel[a].pan_l != g_engine.chip.channel[b].pan_l,
+          "unison 2 stereo: the channels are panned to opposite sides");
+
+    p.unison = 3;
+    start(48000.0, &p);
+    genisys_engine_note_on(&g_engine, 60, 100);
+    genisys_engine_note_on(&g_engine, 64, 100);
+    genisys_engine_note_on(&g_engine, 67, 100);
+    CHECK(held_voices() == 6, "unison 3: two notes fill all six channels; a third steals");
+}
+
+static void test_mono_last_note_priority(void) {
+    GenisysPatch p = sine_patch();
+    p.voice_mode = GENISYS_MODE_MONO;
+    start(48000.0, &p);
+    genisys_engine_note_on(&g_engine, 60, 100);
+    genisys_engine_note_on(&g_engine, 64, 100);
+    CHECK(held_voices() == 1 && g_engine.voice[0].note == 64, "mono: one channel, playing the newest key");
+    genisys_engine_note_off(&g_engine, 64);
+    CHECK(held_voices() == 1 && g_engine.voice[0].note == 60, "mono: releasing it falls back to the key still held");
+    genisys_engine_note_off(&g_engine, 60);
+    CHECK(held_voices() == 0, "mono: releasing the last key releases the note");
+}
+
+/* Whether a second, overlapping key restarts the carrier's attack. */
+static int second_note_restarts_attack(int mode) {
+    GenisysPatch p = sine_patch();
+    p.voice_mode = mode;
+    p.op[3].ar = 10;  /* slow attack, so a restart is visible */
+    p.op[3].d1r = 20; /* decay to a quieter sustain first: an attack */
+    p.op[3].sl = 10;  /* from full volume would finish instantly */
+    start(48000.0, &p);
+    genisys_engine_note_on(&g_engine, 60, 100);
+    genisys_engine_render(&g_engine, g_left, g_right, 48000); /* attack finishes */
+    genisys_engine_note_on(&g_engine, 64, 100);
+    return g_engine.chip.channel[0].op[3].state == YM_EG_ATT;
+}
+
+static void test_legato_does_not_retrigger(void) {
+    CHECK(second_note_restarts_attack(GENISYS_MODE_MONO), "mono: an overlapping key restarts the envelope");
+    CHECK(!second_note_restarts_attack(GENISYS_MODE_LEGATO), "legato: an overlapping key only changes pitch");
+}
+
+static void test_glide(void) {
+    GenisysPatch p = sine_patch();
+    double mid, end;
+    char msg[160];
+
+    p.voice_mode = GENISYS_MODE_LEGATO;
+    p.glide_time = 100;
+    start(48000.0, &p);
+    genisys_engine_note_on(&g_engine, 57, 100);  /* A3, 220 Hz */
+    genisys_engine_render(&g_engine, g_left, g_right, 4800);
+    genisys_engine_note_on(&g_engine, 69, 100);  /* A4, 440 Hz */
+    genisys_engine_render(&g_engine, g_left, g_right, 2400); /* 50 ms in */
+    mid = voice_hz(0);
+    genisys_engine_render(&g_engine, g_left, g_right, 9600); /* 250 ms in */
+    end = voice_hz(0);
+    snprintf(msg, sizeof msg, "glide 100 ms: half-way through it is between the notes (%.0f Hz)", mid);
+    CHECK(mid > 250.0 && mid < 400.0, msg);
+    snprintf(msg, sizeof msg, "glide 100 ms: after it ends it sits on the new note (%.1f Hz)", end);
+    CHECK(fabs(end / 440.0 - 1.0) < 0.003, msg);
+}
+
 int main(void) {
     genisys_engine_global_init();
 
@@ -627,6 +716,10 @@ int main(void) {
     test_mod_wheel_vibrato();
     test_sustain_pedal();
     test_psg_follows_bend();
+    test_unison();
+    test_mono_last_note_priority();
+    test_legato_does_not_retrigger();
+    test_glide();
 
     if (g_failures == 0) {
         printf("\nAll tests passed.\n");
