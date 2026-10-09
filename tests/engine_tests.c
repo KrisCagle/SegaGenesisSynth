@@ -686,6 +686,53 @@ static void test_glide(void) {
     CHECK(fabs(end / 440.0 - 1.0) < 0.003, msg);
 }
 
+/* ---- FM / PSG balance ---- */
+
+static float peak_of(const float *x, int from, int to) {
+    float m = 0.0f;
+    int i;
+    for (i = from; i < to; i++) if (fabsf(x[i]) > m) m = fabsf(x[i]);
+    return m;
+}
+
+static void test_fm_psg_balance(void) {
+    GenisysPatch p = sine_patch();
+    GenisysPsgSettings s = genisys_default_psg();
+    double fm_peak, fm_rms, psg_peak, psg_rms;
+
+    /* A full-volume FM sine... */
+    start_console(48000.0, &p, GENISYS_CHIP_CLEAN, 0);
+    genisys_engine_note_on(&g_engine, 69, 127);
+    genisys_engine_render(&g_engine, g_left, g_right, 9600);
+    fm_peak = peak_of(g_left, 4800, 9600);
+    fm_rms = rms(g_left, 4800, 9600);
+
+    /* ...against a full-volume PSG square with the FM silenced. */
+    p.op[3].tl = 127;
+    start_console(48000.0, &p, GENISYS_CHIP_CLEAN, 0);
+    s.mode = GENISYS_PSG_UNISON;
+    s.level = 15;
+    s.attack = 0;
+    s.sustain = 15;
+    genisys_engine_set_psg(&g_engine, &s);
+    genisys_engine_note_on(&g_engine, 69, 127);
+    genisys_engine_render(&g_engine, g_left, g_right, 9600);
+    psg_peak = peak_of(g_left, 4800, 9600);
+    psg_rms = rms(g_left, 4800, 9600);
+
+    /* Compare RMS: a band-limited square rings above its nominal level at
+     * each edge (Gibbs), so its peak overstates it. Target: a +/-2100
+     * square (RMS 2100) against an 8191 sine (RMS 8191/sqrt 2). */
+    {
+        double want = 2100.0 / (8191.0 / sqrt(2.0)), got = psg_rms / fm_rms;
+        char msg[160];
+        (void)fm_peak;
+        (void)psg_peak;
+        snprintf(msg, sizeof msg, "PSG/FM level matches Genesis Plus GX (RMS ratio %.3f, want %.3f within 5%%)", got, want);
+        CHECK(fabs(got / want - 1.0) < 0.05, msg);
+    }
+}
+
 int main(void) {
     genisys_engine_global_init();
 
@@ -720,6 +767,7 @@ int main(void) {
     test_mono_last_note_priority();
     test_legato_does_not_retrigger();
     test_glide();
+    test_fm_psg_balance();
 
     if (g_failures == 0) {
         printf("\nAll tests passed.\n");
