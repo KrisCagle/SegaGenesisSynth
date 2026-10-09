@@ -250,7 +250,7 @@ void GenisysProcessor::setCurrentProgram (int index)
         return;
 
     currentProgram = index;
-    genisys::params::applyPatch (state, genisys_preset_patch (index));
+    genisys::params::applyPreset (state, index);
 }
 
 const juce::String GenisysProcessor::getProgramName (int index)

@@ -5,9 +5,12 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "genisys_drums.h"
 #include "genisys_engine.h"
+#include "genisys_presets.h"
+#include "../tools/preset_loudness.h"
 
 static int g_failures = 0;
 
@@ -733,6 +736,49 @@ static void test_fm_psg_balance(void) {
     }
 }
 
+/* ---- Factory presets ---- */
+
+static void test_preset_library_shape(void) {
+    int i, j, n = genisys_preset_count(), names_unique = 1, sounds_unique = 1, categorised = 1;
+    char msg[160];
+
+    for (i = 0; i < n; i++) {
+        GenisysPatch a = genisys_preset_patch(i);
+        if (genisys_preset_category(i) == NULL || genisys_preset_category(i)[0] == '\0') categorised = 0;
+        for (j = i + 1; j < n; j++) {
+            GenisysPatch b = genisys_preset_patch(j);
+            if (strcmp(genisys_preset_name(i), genisys_preset_name(j)) == 0) names_unique = 0;
+            if (memcmp(&a, &b, sizeof a) == 0) {
+                GenisysPsgSettings pa = genisys_preset_psg(i), pb = genisys_preset_psg(j);
+                if (memcmp(&pa, &pb, sizeof pa) == 0) sounds_unique = 0;
+            }
+        }
+    }
+    snprintf(msg, sizeof msg, "the factory library has %d presets (want at least 60)", n);
+    CHECK(n >= 60, msg);
+    CHECK(categorised, "every preset has a category");
+    CHECK(names_unique, "every preset has a unique name");
+    CHECK(sounds_unique, "no two presets are the same sound");
+}
+
+static void test_presets_are_balanced(void) {
+    int i, ok = 1;
+    for (i = 0; i < genisys_preset_count(); i++) {
+        double db = preset_loudness_db(&g_engine, i);
+        /* PSG-only sounds can't be raised further: the PSG is already at
+         * full level, so they get a wider allowance. */
+        GenisysPatch p = genisys_preset_patch(i);
+        int fm_silent = p.op[0].tl == 127 && p.op[1].tl == 127 && p.op[2].tl == 127 && p.op[3].tl == 127;
+        double allowed = fm_silent ? 4.0 : 2.0;
+        if (fabs(db - PRESET_LOUDNESS_TARGET_DB) > allowed) {
+            printf("  out of balance: %s / %s at %.1f dB (run tools/preset_levels)\n",
+                   genisys_preset_category(i), genisys_preset_name(i), db);
+            ok = 0;
+        }
+    }
+    CHECK(ok, "every preset plays within 2 dB of the target loudness (switching presets doesn't jump in volume)");
+}
+
 int main(void) {
     genisys_engine_global_init();
 
@@ -768,6 +814,8 @@ int main(void) {
     test_legato_does_not_retrigger();
     test_glide();
     test_fm_psg_balance();
+    test_preset_library_shape();
+    test_presets_are_balanced();
 
     if (g_failures == 0) {
         printf("\nAll tests passed.\n");

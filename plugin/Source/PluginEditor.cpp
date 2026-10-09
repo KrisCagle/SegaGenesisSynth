@@ -1,5 +1,7 @@
 #include "PluginEditor.h"
 
+#include "genisys_presets.h"
+
 namespace
 {
     constexpr int kTopBarHeight = 40;
@@ -23,8 +25,17 @@ GenisysEditor::GenisysEditor (GenisysProcessor& p)
     presetLabel.setJustificationType (juce::Justification::centredRight);
     addAndMakeVisible (presetLabel);
 
+    juce::String lastCategory;
     for (int i = 0; i < genisys.getNumPrograms(); ++i)
+    {
+        const juce::String category (genisys_preset_category (i));
+        if (category != lastCategory)
+        {
+            presetBox.addSectionHeading (category);
+            lastCategory = category;
+        }
         presetBox.addItem (genisys.getProgramName (i), i + 1); // ComboBox IDs must be non-zero
+    }
     presetBox.setSelectedId (genisys.getCurrentProgram() + 1, juce::dontSendNotification);
     presetBox.onChange = [this] { genisys.setCurrentProgram (presetBox.getSelectedId() - 1); };
     addAndMakeVisible (presetBox);

@@ -201,6 +201,25 @@ namespace
                "selecting a program loads that preset's parameters");
     }
 
+    void testPresetLoadsLayersAndEffects()
+    {
+        auto p = makeProcessor();
+        int chipArp = -1, withReverb = -1;
+        for (int i = 0; i < p->getNumPrograms(); ++i)
+        {
+            if (genisys_preset_psg (i).mode == GENISYS_PSG_ARPEGGIO && chipArp < 0)
+                chipArp = i;
+            if (genisys_preset_fx (i).reverb_mix > 0 && withReverb < 0)
+                withReverb = i;
+        }
+        p->setCurrentProgram (chipArp);
+        check (intParam (*p, "psg_mode") == GENISYS_PSG_ARPEGGIO, "a preset with a PSG arpeggio switches the PSG layer on");
+        p->setCurrentProgram (withReverb);
+        check (intParam (*p, "reverb_on") == 1 && intParam (*p, "psg_mode") == GENISYS_PSG_OFF,
+               "the next preset brings its own effects and clears the previous PSG layer");
+        check (p->getNumPrograms() >= 60, "the plugin exposes the full preset library");
+    }
+
     void testDrumsOnChannel10()
     {
         auto p = makeProcessor();
@@ -429,6 +448,7 @@ int main()
     testStateRoundTrip();
     testStateRestoresInBetweenValues();
     testProgramChange();
+    testPresetLoadsLayersAndEffects();
     testDrumsOnChannel10();
     testSustainPedal();
     testOctaveShiftReleasesCorrectNote();
