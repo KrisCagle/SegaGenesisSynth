@@ -5,9 +5,12 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "genisys_drums.h"
 #include "genisys_engine.h"
+#include "genisys_presets.h"
+#include "../tools/preset_loudness.h"
 
 static int g_failures = 0;
 
@@ -686,6 +689,162 @@ static void test_glide(void) {
     CHECK(fabs(end / 440.0 - 1.0) < 0.003, msg);
 }
 
+/* ---- FM / PSG balance ---- */
+
+static float peak_of(const float *x, int from, int to) {
+    float m = 0.0f;
+    int i;
+    for (i = from; i < to; i++) if (fabsf(x[i]) > m) m = fabsf(x[i]);
+    return m;
+}
+
+static void test_fm_psg_balance(void) {
+    GenisysPatch p = sine_patch();
+    GenisysPsgSettings s = genisys_default_psg();
+    double fm_peak, fm_rms, psg_peak, psg_rms;
+
+    /* A full-volume FM sine... */
+    start_console(48000.0, &p, GENISYS_CHIP_CLEAN, 0);
+    genisys_engine_note_on(&g_engine, 69, 127);
+    genisys_engine_render(&g_engine, g_left, g_right, 9600);
+    fm_peak = peak_of(g_left, 4800, 9600);
+    fm_rms = rms(g_left, 4800, 9600);
+
+    /* ...against a full-volume PSG square with the FM silenced. */
+    p.op[3].tl = 127;
+    start_console(48000.0, &p, GENISYS_CHIP_CLEAN, 0);
+    s.mode = GENISYS_PSG_UNISON;
+    s.level = 15;
+    s.attack = 0;
+    s.sustain = 15;
+    genisys_engine_set_psg(&g_engine, &s);
+    genisys_engine_note_on(&g_engine, 69, 127);
+    genisys_engine_render(&g_engine, g_left, g_right, 9600);
+    psg_peak = peak_of(g_left, 4800, 9600);
+    psg_rms = rms(g_left, 4800, 9600);
+
+    /* Compare RMS: a band-limited square rings above its nominal level at
+     * each edge (Gibbs), so its peak overstates it. Target: a +/-2100
+     * square (RMS 2100) against an 8191 sine (RMS 8191/sqrt 2). */
+    {
+        double want = 2100.0 / (8191.0 / sqrt(2.0)), got = psg_rms / fm_rms;
+        char msg[160];
+        (void)fm_peak;
+        (void)psg_peak;
+        snprintf(msg, sizeof msg, "PSG/FM level matches Genesis Plus GX (RMS ratio %.3f, want %.3f within 5%%)", got, want);
+        CHECK(fabs(got / want - 1.0) < 0.05, msg);
+    }
+}
+
+/* ---- Factory presets ---- */
+
+static void test_preset_library_shape(void) {
+    int i, j, n = genisys_preset_count(), names_unique = 1, sounds_unique = 1, categorised = 1;
+    char msg[160];
+
+    for (i = 0; i < n; i++) {
+        GenisysPatch a = genisys_preset_patch(i);
+        if (genisys_preset_category(i) == NULL || genisys_preset_category(i)[0] == '\0') categorised = 0;
+        for (j = i + 1; j < n; j++) {
+            GenisysPatch b = genisys_preset_patch(j);
+            if (strcmp(genisys_preset_name(i), genisys_preset_name(j)) == 0) names_unique = 0;
+            if (memcmp(&a, &b, sizeof a) == 0) {
+                GenisysPsgSettings pa = genisys_preset_psg(i), pb = genisys_preset_psg(j);
+                if (memcmp(&pa, &pb, sizeof pa) == 0) sounds_unique = 0;
+            }
+        }
+    }
+    snprintf(msg, sizeof msg, "the factory library has %d presets (want at least 60)", n);
+    CHECK(n >= 60, msg);
+    CHECK(categorised, "every preset has a category");
+    CHECK(names_unique, "every preset has a unique name");
+    CHECK(sounds_unique, "no two presets are the same sound");
+}
+
+static void test_presets_are_balanced(void) {
+    int i, ok = 1;
+    for (i = 0; i < genisys_preset_count(); i++) {
+        double db = preset_loudness_db(&g_engine, i);
+        /* PSG-only sounds can't be raised further: the PSG is already at
+         * full level, so they get a wider allowance. */
+        GenisysPatch p = genisys_preset_patch(i);
+        int fm_silent = p.op[0].tl == 127 && p.op[1].tl == 127 && p.op[2].tl == 127 && p.op[3].tl == 127;
+        double allowed = fm_silent ? 4.0 : 2.0;
+        if (fabs(db - PRESET_LOUDNESS_TARGET_DB) > allowed) {
+            printf("  out of balance: %s / %s at %.1f dB (run tools/preset_levels)\n",
+                   genisys_preset_category(i), genisys_preset_name(i), db);
+            ok = 0;
+        }
+    }
+    CHECK(ok, "every preset plays within 2 dB of the target loudness (switching presets doesn't jump in volume)");
+}
+
+/* ---- Quick Sound macros ---- */
+
+static void test_macros(void) {
+    GenisysPatch p = genisys_default_patch(); /* algorithm 0: OP1-3 modulate, OP4 carries */
+    uint32_t mod_before, car_before, ar_before;
+
+    p.op[3].ar = 20;
+    start(48000.0, &p);
+    genisys_engine_note_on(&g_engine, 60, 127);
+    mod_before = g_engine.chip.channel[0].op[0].tl;
+    car_before = g_engine.chip.channel[0].op[3].tl;
+    ar_before = g_engine.chip.channel[0].op[3].ar;
+
+    p.macro_bright = 100;
+    p.macro_attack = 100;
+    genisys_engine_set_patch(&g_engine, &p);
+    CHECK(g_engine.chip.channel[0].op[0].tl < mod_before, "BRIGHT up lowers modulator levels (more modulation)");
+    CHECK(g_engine.chip.channel[0].op[3].tl == car_before, "BRIGHT leaves carriers alone (tone, not volume)");
+    CHECK(g_engine.chip.channel[0].op[3].ar < ar_before, "ATTACK up slows the attack");
+
+    p.macro_bright = 0;
+    p.macro_attack = 0;
+    genisys_engine_set_patch(&g_engine, &p);
+    CHECK(g_engine.chip.channel[0].op[0].tl == mod_before && g_engine.chip.channel[0].op[3].ar == ar_before,
+          "macros at 0 give back the exact programmed sound");
+}
+
+static void test_vibrato_macro(void) {
+    double wobble_on;
+    {
+        GenisysPatch q = sine_patch();
+        int i, frames = 48000, last = -1;
+        double shortest = 1e9, longest = 0.0;
+        q.vibrato_depth = 50;
+        q.vibrato_amount = 100;
+        start(48000.0, &q);
+        genisys_engine_note_on(&g_engine, 69, 127);
+        genisys_engine_render(&g_engine, g_left, g_right, frames);
+        for (i = 4800; i < frames - 1; i++) {
+            if (g_left[i] <= 0.0f && g_left[i + 1] > 0.0f) {
+                if (last >= 0) {
+                    double period = i - last;
+                    if (period < shortest) shortest = period;
+                    if (period > longest) longest = period;
+                }
+                last = i;
+            }
+        }
+        wobble_on = longest / shortest;
+    }
+    CHECK(wobble_on > 1.04, "VIBRATO macro wobbles the pitch without touching the mod wheel");
+}
+
+static void test_active_voices(void) {
+    GenisysPatch p = sine_patch();
+    start(48000.0, &p);
+    CHECK(genisys_engine_active_voices(&g_engine) == 0, "no voices lit when silent");
+    genisys_engine_note_on(&g_engine, 60, 100);
+    genisys_engine_note_on(&g_engine, 64, 100);
+    CHECK(genisys_engine_active_voices(&g_engine) == 0x03, "two held notes light two voices");
+    genisys_engine_note_off(&g_engine, 60);
+    genisys_engine_note_off(&g_engine, 64);
+    genisys_engine_render(&g_engine, g_left, g_right, 48000);
+    CHECK(genisys_engine_active_voices(&g_engine) == 0, "lights go out once the release tails end");
+}
+
 int main(void) {
     genisys_engine_global_init();
 
@@ -720,6 +879,12 @@ int main(void) {
     test_mono_last_note_priority();
     test_legato_does_not_retrigger();
     test_glide();
+    test_fm_psg_balance();
+    test_preset_library_shape();
+    test_presets_are_balanced();
+    test_macros();
+    test_vibrato_macro();
+    test_active_voices();
 
     if (g_failures == 0) {
         printf("\nAll tests passed.\n");

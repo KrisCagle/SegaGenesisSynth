@@ -1,0 +1,109 @@
+name: Release
+
+# Pushing a version tag (e.g. v0.1.0, or v0.1.0-beta for a pre-release)
+# builds Genisys for Windows, macOS and Linux and publishes the zips on the
+# GitHub Releases page.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: # builds the zips (as artifacts) without publishing
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            targets: Genisys_VST3 Genisys_Standalone
+          - name: macOS
+            os: macos-latest
+            targets: Genisys_VST3 Genisys_AU Genisys_Standalone
+            # One "universal" binary for Apple Silicon and Intel Macs.
+            cmake_extra: -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13
+          - name: Linux
+            os: ubuntu-latest
+            targets: Genisys_VST3 Genisys_Standalone
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libjack-jackd2-dev libfreetype-dev libfontconfig1-dev \
+            libx11-dev libxcomposite-dev libxcursor-dev libxext-dev libxinerama-dev libxrandr-dev \
+            libxrender-dev libxi-dev
+
+      - name: Configure
+        shell: bash
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DGENISYS_BUILD_TESTS=OFF -DGENISYS_BUILD_TOOLS=OFF ${{ matrix.cmake_extra }}
+
+      - name: Build
+        run: cmake --build build --config Release --parallel --target ${{ matrix.targets }}
+
+      - name: Package
+        shell: bash
+        run: |
+          ART=build/plugin/Genisys_artefacts/Release
+          mkdir -p dist/Genisys
+          cp -R "$ART/VST3/Genisys.vst3" dist/Genisys/
+          case "${{ runner.os }}" in
+            Windows) cp "$ART/Standalone/Genisys.exe" dist/Genisys/ ;;
+            macOS)   cp -R "$ART/AU/Genisys.component" "$ART/Standalone/Genisys.app" dist/Genisys/ ;;
+            Linux)   cp "$ART/Standalone/Genisys" dist/Genisys/ ;;
+          esac
+          cat > dist/Genisys/INSTALL.txt <<EOF
+          Genisys ${GITHUB_REF_NAME} for ${{ matrix.name }}
+
+          Plugin: copy the whole Genisys.vst3 folder into your VST3 folder
+            Windows: C:\Program Files\Common Files\VST3
+            macOS:   ~/Library/Audio/Plug-Ins/VST3/   (Genisys.component -> ~/Library/Audio/Plug-Ins/Components/)
+            Linux:   ~/.vst3/
+          then rescan plugins in your DAW.
+
+          Standalone: run Genisys directly. For a MIDI keyboard use Options > Audio/MIDI Settings.
+
+          Full guide: https://github.com/${{ github.repository }}#install-the-plugin-for-your-daw
+          EOF
+          cd dist
+          case "${{ runner.os }}" in
+            Windows) 7z a "../Genisys-${{ matrix.name }}.zip" Genisys > /dev/null ;;
+            macOS)   ditto -c -k --keepParent Genisys "../Genisys-${{ matrix.name }}.zip" ;;
+            Linux)   zip -qr "../Genisys-${{ matrix.name }}.zip" Genisys ;;
+          esac
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Genisys-${{ matrix.name }}
+          path: Genisys-${{ matrix.name }}.zip
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PRERELEASE=""
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then PRERELEASE="--prerelease"; fi
+          gh release create "$GITHUB_REF_NAME" dist/*.zip \
+            --repo "${{ github.repository }}" \
+            --title "Genisys $GITHUB_REF_NAME" \
+            --notes "Download the zip for your computer, unzip it, and follow the [install guide](https://github.com/${{ github.repository }}#install-the-plugin-for-your-daw)." \
+            --generate-notes $PRERELEASE

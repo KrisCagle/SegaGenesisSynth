@@ -15,7 +15,8 @@ else()
 endif()
 option(GENISYS_BUILD_PLUGIN  "Build the Genisys plugin (VST3/AU/Standalone) with JUCE" ${GENISYS_PLUGIN_DEFAULT})
 option(GENISYS_BUILD_TESTS   "Build and register the unit tests" ON)
-option(GENISYS_BUILD_TOOLS   "Build command-line tools (demo WAV renderer)" ON)
+option(GENISYS_BUILD_TOOLS   "Build command-line tools (demo WAV renderer, preset levels)" ON)
+option(GENISYS_BUILD_UI_SNAPSHOT "Build the editor-to-PNG snapshot tool (a third full JUCE build)" OFF)
 option(GENISYS_BUILD_DESKTOP "Build the raylib desktop app (Windows + MinGW, needs raylib)" OFF)
 option(GENISYS_BUILD_PC_DEMO "Build the Windows-only miniaudio test-tone demo" OFF)
 
@@ -86,9 +87,15 @@ endif()
 
 # ---- Tools -------------------------------------------------------------------
 if(GENISYS_BUILD_TOOLS)
-    add_executable(genisys_render tools/genisys_render.c)
-    target_link_libraries(genisys_render PRIVATE genisys_engine)
-    genisys_set_warnings(genisys_render)
+    foreach(tool_name genisys_render preset_levels)
+        add_executable(${tool_name} tools/${tool_name}.c)
+        target_link_libraries(${tool_name} PRIVATE genisys_engine)
+        genisys_set_warnings(${tool_name})
+        if(MSVC)
+            # fopen is standard C; MSVC's suggested fopen_s is Windows-only.
+            target_compile_definitions(${tool_name} PRIVATE _CRT_SECURE_NO_WARNINGS)
+        endif()
+    endforeach()
 endif()
 
 # ---- raylib desktop app (to be replaced by the plugin's Standalone app) --

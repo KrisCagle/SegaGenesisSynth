@@ -227,6 +227,38 @@ void GenisysProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
         for (int ch = 0; ch < outputs; ++ch)
             buffer.getWritePointer (ch)[i] *= gain;
     }
+
+    // Feed the editor's scope (mono, every 2nd sample); drop samples if it
+    // isn't reading, never block.
+    if (outputs > 0)
+    {
+        const auto* l = buffer.getReadPointer (0);
+        const auto* r = buffer.getReadPointer (outputs > 1 ? 1 : 0);
+        for (int i = 0; i < numSamples; ++i)
+        {
+            if (++scopeDecimate < 2)
+                continue;
+            scopeDecimate = 0;
+            if (scopeFifo.getFreeSpace() == 0)
+                break;
+            const auto write = scopeFifo.write (1);
+            if (write.blockSize1 > 0)
+                scopeBuffer[(size_t) write.startIndex1] = 0.5f * (l[i] + r[i]);
+        }
+    }
+    activeVoices.store (genisys_engine_active_voices (engine.get()), std::memory_order_relaxed);
+}
+
+int GenisysProcessor::readScope (float* dest, int max)
+{
+    const int count = juce::jmin (max, scopeFifo.getNumReady());
+    const auto read = scopeFifo.read (count);
+    int n = 0;
+    for (int i = 0; i < read.blockSize1; ++i)
+        dest[n++] = scopeBuffer[(size_t) (read.startIndex1 + i)];
+    for (int i = 0; i < read.blockSize2; ++i)
+        dest[n++] = scopeBuffer[(size_t) (read.startIndex2 + i)];
+    return n;
 }
 
 double GenisysProcessor::getTailLengthSeconds() const
@@ -250,7 +282,7 @@ void GenisysProcessor::setCurrentProgram (int index)
         return;
 
     currentProgram = index;
-    genisys::params::applyPatch (state, genisys_preset_patch (index));
+    genisys::params::applyPreset (state, index);
 }
 
 const juce::String GenisysProcessor::getProgramName (int index)

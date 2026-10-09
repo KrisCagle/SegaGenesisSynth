@@ -1,5 +1,7 @@
 #include "Parameters.h"
 
+#include "genisys_presets.h"
+
 namespace genisys::params
 {
 namespace
@@ -67,6 +69,7 @@ namespace
     juce::String semitoneLabel (int v) { return juce::String (v) + (v == 1 ? " semitone" : " semitones"); }
     juce::String centsLabel (int v) { return juce::String (v) + " cents"; }
     juce::String tenthsHzLabel (int v) { return juce::String (v / 10.0, 1) + " Hz"; }
+    juce::String signedPercentLabel (int v) { return (v > 0 ? "+" : "") + juce::String (v) + "%"; }
     juce::String msLabel (int v) { return v == 0 ? juce::String ("Off") : juce::String (v) + " ms"; }
 
     std::unique_ptr<juce::AudioParameterFloat> floatParam (const juce::String& id, const juce::String& name,
@@ -86,11 +89,11 @@ namespace
     // PSG envelopes step once per 60 Hz frame (~16.7 ms).
     juce::String framesPerStepLabel (int v)
     {
-        return v == 0 ? juce::String ("Instant") : juce::String (v * 1000.0 / 60.0, 0) + " ms/step";
+        return v == 0 ? juce::String ("Instant") : juce::String ((int) std::lround (v * 1000.0 / 60.0)) + " ms";
     }
     juce::String psgVolumeLabel (int v) { return v == 0 ? juce::String ("Silent") : juce::String (-2 * (15 - v)) + " dB"; }
     juce::String octaveLabel (int v) { return v == 0 ? juce::String ("0") : (v > 0 ? "+" : "") + juce::String (v) + " oct"; }
-    juce::String arpSpeedLabel (int v) { return juce::String (v * 1000.0 / 60.0, 0) + " ms"; }
+    juce::String arpSpeedLabel (int v) { return juce::String ((int) std::lround (v * 1000.0 / 60.0)) + " ms"; }
 
     std::atomic<float>* raw (juce::AudioProcessorValueTreeState& state, const juce::String& id)
     {
@@ -130,6 +133,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     layout.add (intParam ("unison", "Unison", 1, 3, def.unison, unisonLabel));
     layout.add (intParam ("unison_detune", "Unison Detune", 0, 50, def.unison_detune, centsLabel));
     layout.add (boolParam ("unison_stereo", "Unison Stereo", def.unison_stereo != 0));
+
+    // Quick Sound macros: relative tweaks on top of the operators (0 = as programmed).
+    layout.add (intParam ("macro_bright", "Quick: Brightness", -100, 100, 0, signedPercentLabel));
+    layout.add (intParam ("macro_attack", "Quick: Attack", -100, 100, 0, signedPercentLabel));
+    layout.add (intParam ("macro_decay", "Quick: Decay", -100, 100, 0, signedPercentLabel));
+    layout.add (intParam ("macro_release", "Quick: Release", -100, 100, 0, signedPercentLabel));
+    layout.add (intParam ("vibrato_amount", "Quick: Vibrato", 0, 100, 0, percentLabel));
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "master_gain", kVersion }, "Master Volume",
         juce::NormalisableRange<float> (-24.0f, 12.0f, 0.1f), 0.0f,
@@ -227,6 +237,9 @@ Snapshot::Snapshot (juce::AudioProcessorValueTreeState& state)
       voiceMode (raw (state, "voice_mode")), glideTime (raw (state, "glide_time")),
       unison (raw (state, "unison")), unisonDetune (raw (state, "unison_detune")),
       unisonStereo (raw (state, "unison_stereo")),
+      macroBright (raw (state, "macro_bright")), macroAttack (raw (state, "macro_attack")),
+      macroDecay (raw (state, "macro_decay")), macroRelease (raw (state, "macro_release")),
+      vibratoAmount (raw (state, "vibrato_amount")),
       chorusOn (raw (state, "chorus_on")), chorusRate (raw (state, "chorus_rate")),
       chorusDepth (raw (state, "chorus_depth")), chorusMix (raw (state, "chorus_mix")),
       echoOn (raw (state, "echo_on")), echoSync (raw (state, "echo_sync")), echoTime (raw (state, "echo_time")),
@@ -281,6 +294,11 @@ GenisysPatch Snapshot::readPatch() const
     patch.unison = asInt (unison);
     patch.unison_detune = asInt (unisonDetune);
     patch.unison_stereo = asInt (unisonStereo);
+    patch.macro_bright = asInt (macroBright);
+    patch.macro_attack = asInt (macroAttack);
+    patch.macro_decay = asInt (macroDecay);
+    patch.macro_release = asInt (macroRelease);
+    patch.vibrato_amount = asInt (vibratoAmount);
 
     for (size_t op = 0; op < 4; ++op)
     {
@@ -352,6 +370,44 @@ GenisysConsoleSettings Snapshot::readConsole() const
     return console;
 }
 
+void applyPreset (juce::AudioProcessorValueTreeState& state, int index)
+{
+    const auto set = [&state] (const juce::String& id, float value)
+    {
+        if (auto* param = state.getParameter (id))
+            param->setValueNotifyingHost (param->convertTo0to1 (value));
+    };
+
+    applyPatch (state, genisys_preset_patch (index));
+
+    const GenisysPsgSettings psg = genisys_preset_psg (index);
+    set ("psg_mode", (float) psg.mode);
+    set ("psg_level", (float) psg.level);
+    set ("psg_octave", (float) psg.octave);
+    set ("psg_attack", (float) psg.attack);
+    set ("psg_decay", (float) psg.decay);
+    set ("psg_sustain", (float) psg.sustain);
+    set ("psg_release", (float) psg.release);
+    set ("psg_arp_speed", (float) psg.arp_speed);
+    set ("noise_on", (float) psg.noise_on);
+
+    const GenisysPresetFx fx = genisys_preset_fx (index);
+    const EffectSettings defaults;
+    set ("chorus_on", fx.chorus_mix > 0 ? 1.0f : 0.0f);
+    set ("chorus_mix", (float) (fx.chorus_mix > 0 ? fx.chorus_mix : (int) (defaults.chorusMix * 100.0f)));
+    set ("chorus_rate", defaults.chorusRateHz);
+    set ("chorus_depth", defaults.chorusDepth * 100.0f);
+    set ("echo_on", fx.echo_mix > 0 ? 1.0f : 0.0f);
+    set ("echo_sync", 1.0f);
+    set ("echo_mix", (float) (fx.echo_mix > 0 ? fx.echo_mix : (int) (defaults.echoMix * 100.0f)));
+    set ("echo_feedback", (float) fx.echo_feedback);
+    set ("echo_division", (float) fx.echo_division);
+    set ("echo_pingpong", 1.0f);
+    set ("reverb_on", fx.reverb_mix > 0 ? 1.0f : 0.0f);
+    set ("reverb_mix", (float) (fx.reverb_mix > 0 ? fx.reverb_mix : (int) (defaults.reverbMix * 100.0f)));
+    set ("reverb_size", (float) fx.reverb_size);
+}
+
 void applyPatch (juce::AudioProcessorValueTreeState& state, const GenisysPatch& patch)
 {
     const auto set = [&state] (const juce::String& id, int value)
@@ -374,6 +430,11 @@ void applyPatch (juce::AudioProcessorValueTreeState& state, const GenisysPatch& 
     set ("unison", patch.unison);
     set ("unison_detune", patch.unison_detune);
     set ("unison_stereo", patch.unison_stereo);
+    set ("macro_bright", patch.macro_bright);
+    set ("macro_attack", patch.macro_attack);
+    set ("macro_decay", patch.macro_decay);
+    set ("macro_release", patch.macro_release);
+    set ("vibrato_amount", patch.vibrato_amount);
 
     for (int op = 0; op < 4; ++op)
     {

@@ -9,6 +9,12 @@
  * voices can exceed 1.0; that's deliberate (see genisys_engine_render). */
 #define OUTPUT_SCALE (1.0f / 32768.0f)
 
+/* FM/PSG balance. synth-core's PSG swings +/-828 at full volume while one
+ * full FM channel peaks at 8191. Genesis Plus GX, whose mix was tuned
+ * against hardware, plays a full PSG square as 0..2800 at a 150% preamp,
+ * i.e. +/-2100 against the same 8191 FM peak. Match that. */
+#define PSG_MIX_GAIN (2100.0f / 828.0f)
+
 /* YM2612 register layout quirk: operator slots are ordered OP1, OP3, OP2,
  * OP4 in the register map, so logical OP1..OP4 sit at these offsets. */
 static const int OP_REG_OFFSET[4] = { 0, 8, 4, 12 };
@@ -125,11 +131,23 @@ static void chip_write_channel(GenisysEngine *e, int voice, uint8_t base_reg, ui
     ym2612_chip_write(&e->chip, voice / 3, (uint8_t)(base_reg + voice % 3), data);
 }
 
+static int clamp_int(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
+/* Quick Sound macro offsets, in register steps. Scaled so the full -100..100
+ * range covers what's musically useful for each register. */
+static int macro_steps(int amount, int max_steps) {
+    return (int)(clamp_int(amount, -100, 100) * max_steps / 100.0 + (amount >= 0 ? 0.5 : -0.5));
+}
+
 static int voice_tl(const GenisysEngine *e, int voice, int op) {
     const GenisysPatch *p = &e->patch;
     int tl = p->op[op].tl;
 
-    if (genisys_carrier_mask(p->algorithm) & (1 << op)) {
+    if (!(genisys_carrier_mask(p->algorithm) & (1 << op))) {
+        /* BRIGHT: modulators only, so it changes tone, not volume. A silent
+         * (127) modulator stays silent. */
+        if (tl < 127) tl = clamp_int(tl - macro_steps(p->macro_bright, 40), 0, 126);
+    } else {
         int vel = e->voice[voice].velocity;
         if (vel < 1) vel = 127;
         tl += (int)(g_velocity_att[vel] * (float)p->velocity_sens / 100.0f + 0.5f);
@@ -150,15 +168,26 @@ static void write_voice_patch(GenisysEngine *e, int voice) {
     const GenisysPatch *p = &e->patch;
     int op;
 
+    /* Macros adjust rates: higher register rates are faster, so "longer"
+     * means subtracting. Attack/release never reach 0 (which would mean
+     * "never"), and decays that are 0 (sustaining) stay 0. */
+    int atk = macro_steps(p->macro_attack, 20);
+    int dec = macro_steps(p->macro_decay, 16);
+    int rel = macro_steps(p->macro_release, 10);
+
     chip_write_channel(e, voice, 0xB0, (uint8_t)((p->algorithm & 7) | ((p->feedback & 7) << 3)));
     for (op = 0; op < 4; op++) {
         const GenisysOperatorParams *o = &p->op[op];
         uint8_t off = (uint8_t)OP_REG_OFFSET[op];
+        int ar = o->ar > 0 ? clamp_int(o->ar - atk, 1, 31) : 0;
+        int d1r = o->d1r > 0 ? clamp_int(o->d1r - dec, 1, 31) : 0;
+        int d2r = o->d2r > 0 ? clamp_int(o->d2r - dec, 1, 31) : 0;
+        int rr = clamp_int(o->rr - rel, 1, 15);
         chip_write_channel(e, voice, (uint8_t)(0x30 + off), (uint8_t)(((o->dt & 7) << 4) | (o->mul & 0x0F)));
-        chip_write_channel(e, voice, (uint8_t)(0x50 + off), (uint8_t)(((o->ks & 3) << 6) | (o->ar & 0x1F)));
-        chip_write_channel(e, voice, (uint8_t)(0x60 + off), (uint8_t)((o->am ? 0x80 : 0) | (o->d1r & 0x1F)));
-        chip_write_channel(e, voice, (uint8_t)(0x70 + off), (uint8_t)(o->d2r & 0x1F));
-        chip_write_channel(e, voice, (uint8_t)(0x80 + off), (uint8_t)(((o->sl & 0x0F) << 4) | (o->rr & 0x0F)));
+        chip_write_channel(e, voice, (uint8_t)(0x50 + off), (uint8_t)(((o->ks & 3) << 6) | ar));
+        chip_write_channel(e, voice, (uint8_t)(0x60 + off), (uint8_t)((o->am ? 0x80 : 0) | d1r));
+        chip_write_channel(e, voice, (uint8_t)(0x70 + off), (uint8_t)d2r);
+        chip_write_channel(e, voice, (uint8_t)(0x80 + off), (uint8_t)(((o->sl & 0x0F) << 4) | rr));
         chip_write_channel(e, voice, (uint8_t)(0x90 + off), (uint8_t)((o->ssg_enable ? 0x08 : 0) | (o->ssg_mode & 7)));
     }
     write_voice_tl(e, voice);
@@ -189,11 +218,35 @@ static void write_voice_pitch(GenisysEngine *e, int v) {
 }
 
 double engine_pitch_offset(const GenisysEngine *e) {
+    /* The VIBRATO macro sets a floor; the mod wheel can add more. */
+    double amount = e->patch.vibrato_amount / 100.0;
     double vibrato = 0.0;
-    if (e->mod_wheel > 0.0 && e->patch.vibrato_depth > 0) {
-        vibrato = e->mod_wheel * e->patch.vibrato_depth / 100.0 * sin(2.0 * 3.14159265358979323846 * e->vibrato_phase);
+    if (e->mod_wheel > amount) amount = e->mod_wheel;
+    if (amount > 0.0 && e->patch.vibrato_depth > 0) {
+        vibrato = amount * e->patch.vibrato_depth / 100.0 * sin(2.0 * 3.14159265358979323846 * e->vibrato_phase);
     }
     return e->bend_semitones + vibrato;
+}
+
+uint8_t genisys_engine_active_voices(const GenisysEngine *e) {
+    uint8_t mask = 0;
+    int v;
+    for (v = 0; v < GENISYS_NUM_VOICES; v++) {
+        if (e->voice[v].state == GENISYS_VOICE_HELD) {
+            mask |= (uint8_t)(1 << v);
+        } else if (e->voice[v].state == GENISYS_VOICE_RELEASED) {
+            /* Still audible if any carrier's envelope is running. */
+            uint8_t carriers = genisys_carrier_mask(e->patch.algorithm);
+            int op;
+            for (op = 0; op < 4; op++) {
+                if ((carriers & (1 << op)) && e->chip.channel[v].op[op].state != YM_EG_OFF) {
+                    mask |= (uint8_t)(1 << v);
+                    break;
+                }
+            }
+        }
+    }
+    return mask;
 }
 
 static void key(GenisysEngine *e, int voice, int on) {
@@ -660,8 +713,9 @@ static void clock_native(GenisysEngine *e, float *left, float *right) {
     if (n > 0) psg_sum /= n;
 
     {
-        float l = (float)(fm_l + psg_sum) * OUTPUT_SCALE;
-        float r = (float)(fm_r + psg_sum) * OUTPUT_SCALE;
+        float psg = (float)psg_sum * PSG_MIX_GAIN;
+        float l = ((float)fm_l + psg) * OUTPUT_SCALE;
+        float r = ((float)fm_r + psg) * OUTPUT_SCALE;
 
         /* DC blocker (one-pole high-pass, ~5 Hz). The console's output
          * capacitors do the same job: the ladder effect leaves a constant

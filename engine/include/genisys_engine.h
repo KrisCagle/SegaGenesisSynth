@@ -67,6 +67,15 @@ typedef struct {
     int unison;        /* 1-3 chip channels per note */
     int unison_detune; /* cents, 0-50: spread between unison channels */
     int unison_stereo; /* 0/1: pan unison channels hard left/right (real chip panning) */
+
+    /* "Quick Sound" macros: relative tweaks on top of the operator settings,
+     * -100..+100, 0 = as programmed. They let anyone reshape a preset
+     * without knowing which operators do what. */
+    int macro_bright;  /* + = brighter: lowers every modulator's TL (carriers untouched) */
+    int macro_attack;  /* + = slower attack on every operator */
+    int macro_decay;   /* + = longer decays (operators that already sustain keep sustaining) */
+    int macro_release; /* + = longer release */
+    int vibrato_amount; /* 0-100 %: vibrato without the mod wheel (the wheel can add more) */
     GenisysOperatorParams op[4]; /* OP1..OP4 */
 } GenisysPatch;
 
@@ -275,6 +284,10 @@ void genisys_pitch_to_block_fnum(double pitch, int *block, int *fnum);
 /* Which operators reach the output (carriers) for an algorithm, as bits:
  * bit0 = OP1 .. bit3 = OP4. */
 uint8_t genisys_carrier_mask(int algorithm);
+
+/* Which of the 6 chip channels are making sound right now (bit n = channel
+ * n): held notes and release tails. For the UI's voice lights. */
+uint8_t genisys_engine_active_voices(const GenisysEngine *e);
 
 #ifdef __cplusplus
 }

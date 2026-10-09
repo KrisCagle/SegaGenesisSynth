@@ -52,6 +52,8 @@ namespace genisys::params
         std::atomic<float>* bendRangeSemis; std::atomic<float>* vibratoDepth; std::atomic<float>* vibratoRate;
         std::atomic<float>* voiceMode; std::atomic<float>* glideTime; std::atomic<float>* unison;
         std::atomic<float>* unisonDetune; std::atomic<float>* unisonStereo;
+        std::atomic<float>* macroBright; std::atomic<float>* macroAttack; std::atomic<float>* macroDecay;
+        std::atomic<float>* macroRelease; std::atomic<float>* vibratoAmount;
         std::atomic<float>* chorusOn; std::atomic<float>* chorusRate; std::atomic<float>* chorusDepth;
         std::atomic<float>* chorusMix; std::atomic<float>* echoOn; std::atomic<float>* echoSync;
         std::atomic<float>* echoTime; std::atomic<float>* echoDivision; std::atomic<float>* echoFeedback;
@@ -70,4 +72,9 @@ namespace genisys::params
     // Sets every patch parameter from a GenisysPatch, notifying the host
     // (used when loading a factory preset). Message thread only.
     void applyPatch (juce::AudioProcessorValueTreeState& state, const GenisysPatch& patch);
+
+    // Loads factory preset `index`: its sound and performance settings, PSG
+    // layer and effects. Global settings (Master Volume, Octave, bend range,
+    // chip model, console filter, drums) are left as they are. Message thread.
+    void applyPreset (juce::AudioProcessorValueTreeState& state, int index);
 }
