@@ -211,6 +211,15 @@ Each phase ends with a working build, passing tests and a commit or PR.
 | **6. Presets** | 80–100 presets + WAV audition tool | Only once parameters stop changing |
 | **7. Release 1.0** | Release pipeline, docs, demo audio, notices | — |
 
+**Progress (2026-10-09):**
+
+| Phase | Status |
+|---|---|
+| 0–4 | Done |
+| 6. Presets | Done: 66 presets |
+| 5. UI/UX | Done: the approved game-menu editor |
+| 7. Release | Started: a release workflow publishes Windows/macOS/Linux zips when a `v*` tag is pushed. The README has install instructions. |
+
 ## 10. Decisions (made 2026-10-09)
 
 1. **Plugin framework: JUCE.** Requires Visual Studio Build Tools (MSVC) on Windows.
