@@ -2,7 +2,21 @@
 
 A synthesizer that recreates the sound of 16-bit console FM music, built on a cycle-accurate emulation of the **Yamaha YM2612** FM chip and the **SN76489** PSG.
 
-> **Status: in development.** The emulation core works and is tested. A VST3 / AU / Standalone plugin is being built. See the [roadmap](docs/ROADMAP.md).
+> **Status: early beta.** Genisys builds as a **VST3** (Windows, macOS, Linux), an **AU** (macOS) and a **Standalone** app. For now the plugin window is a plain list of controls; the themed interface comes later. See the [roadmap](docs/ROADMAP.md).
+
+## Installing
+
+Download the zip for your system from the latest CI run or release, then copy the plugin into your plugin folder:
+
+| System | VST3 goes in | AU (Mac only) goes in |
+|---|---|---|
+| Windows | `C:\Program Files\Common Files\VST3\` | — |
+| macOS | `~/Library/Audio/Plug-Ins/VST3/` | `~/Library/Audio/Plug-Ins/Components/` |
+| Linux | `~/.vst3/` | — |
+
+Then rescan plugins in your DAW. `Genisys.vst3` is a folder; copy the whole folder. The Standalone app runs on its own, with no DAW needed.
+
+> The builds aren't code-signed yet, so Windows SmartScreen or macOS Gatekeeper may warn the first time. On macOS, right-click the app or plugin and choose **Open**, or run `xattr -dr com.apple.quarantine <path>`.
 
 ## What's inside
 
@@ -22,7 +36,7 @@ A synthesizer that recreates the sound of 16-bit console FM music, built on a cy
 
 ## Building
 
-Requires CMake 3.22+ and a C11 compiler (MSVC, GCC or Clang).
+Requires CMake 3.22+, a C11 compiler, and for the plugin a C++17 compiler: MSVC 2022 on Windows, Xcode/Clang on macOS, or GCC/Clang on Linux. CMake downloads JUCE 9.0.2 automatically, pinned to a verified checksum.
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -30,10 +44,13 @@ cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-Optional targets:
+Plugin files end up in `build/plugin/Genisys_artefacts/Release/`.
+
+Options:
 
 | Option | What it builds |
 |---|---|
+| `-DGENISYS_BUILD_PLUGIN=OFF` | skip the JUCE plugin (on by default, except with MinGW) |
 | `-DGENISYS_BUILD_DESKTOP=ON` | raylib desktop app (Windows with MinGW/GCC, needs raylib from MSYS2) |
 | `-DGENISYS_BUILD_PC_DEMO=ON` | miniaudio test-tone demo (Windows) |
 
@@ -42,6 +59,7 @@ Optional targets:
 ```
 synth-core/   chip emulation (YM2612, SN76489): platform-independent integer C
 engine/       voices, patches, MIDI, resampling: shared by every front-end
+plugin/       the JUCE plugin (VST3 / AU / Standalone)
 tests/        unit tests for the cores and the engine, run through CTest
 desktop/      raylib prototype app
 pc/           headless test-tone demo
@@ -52,6 +70,10 @@ docs/         roadmap and design notes
 ## Credits
 
 The YM2612 envelope-rate, detune and key-code tables are reverse-engineered hardware timing data. They come from the lineage of MAME's YM2612 core (Jarek Burczynski, Tatsuyuki Satoh), refined by Eke-Eke for Genesis Plus GX using Nemesis's and Sauraen's hardware research. See the header of `synth-core/src/ym2612.c`.
+
+## Third-party
+
+- [JUCE](https://juce.com) 9 (AGPLv3), which includes the Steinberg VST3 SDK.
 
 ## License
 

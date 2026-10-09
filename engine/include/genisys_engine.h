@@ -23,6 +23,10 @@
 #include "ym2612.h"
 #include "genisys_resampler.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define GENISYS_NUM_VOICES 6 /* one per YM2612 channel: the hardware limit */
 
 /* ---- Patch: every field is a real register value, in register units ---- */
@@ -125,5 +129,9 @@ void genisys_note_to_block_fnum(int note, int *block, int *fnum);
 /* Which operators reach the output (carriers) for an algorithm, as bits:
  * bit0 = OP1 .. bit3 = OP4. */
 uint8_t genisys_carrier_mask(int algorithm);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* GENISYS_ENGINE_H */

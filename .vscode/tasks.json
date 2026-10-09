@@ -11,11 +11,36 @@
     },
     "tasks": [
         {
+            "label": "Build plugin + tests (MSVC)",
+            "type": "shell",
+            "command": "cmake -S . -B build-msvc -G 'Visual Studio 17 2022' -A x64; cmake --build build-msvc --config Release --parallel",
+            "options": { "cwd": "${workspaceFolder}" },
+            "group": { "kind": "build", "isDefault": true },
+            "problemMatcher": ["$msCompile"]
+        },
+        {
+            "label": "Run plugin tests (MSVC build)",
+            "type": "shell",
+            "command": "ctest --test-dir build-msvc -C Release --output-on-failure",
+            "options": { "cwd": "${workspaceFolder}" },
+            "group": "test",
+            "dependsOn": "Build plugin + tests (MSVC)",
+            "problemMatcher": []
+        },
+        {
+            "label": "Run Genisys standalone",
+            "type": "shell",
+            "command": "./build-msvc/plugin/Genisys_artefacts/Release/Standalone/Genisys.exe",
+            "options": { "cwd": "${workspaceFolder}" },
+            "dependsOn": "Build plugin + tests (MSVC)",
+            "problemMatcher": []
+        },
+        {
             "label": "Build desktop app + tests (GCC)",
             "type": "shell",
             "command": "cmake -S . -B build-gcc -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc -DGENISYS_BUILD_DESKTOP=ON -DGENISYS_BUILD_PC_DEMO=ON; cmake --build build-gcc",
             "options": { "cwd": "${workspaceFolder}" },
-            "group": { "kind": "build", "isDefault": true },
+            "group": "build",
             "problemMatcher": ["$gcc"]
         },
         {

@@ -6,15 +6,25 @@ project(Genisys
     LANGUAGES C)
 
 # ---- Options -------------------------------------------------------------
-# The plugin (JUCE) target is added in a later phase; for now the build covers
-# the emulation core, its tests, and the two existing PC front-ends.
-option(GENISYS_BUILD_TESTS   "Build and register the synth-core unit tests" ON)
+# JUCE doesn't support MinGW, so the plugin is off by default there (that
+# toolchain is only used for the raylib desktop app).
+if(MINGW)
+    set(GENISYS_PLUGIN_DEFAULT OFF)
+else()
+    set(GENISYS_PLUGIN_DEFAULT ON)
+endif()
+option(GENISYS_BUILD_PLUGIN  "Build the Genisys plugin (VST3/AU/Standalone) with JUCE" ${GENISYS_PLUGIN_DEFAULT})
+option(GENISYS_BUILD_TESTS   "Build and register the unit tests" ON)
 option(GENISYS_BUILD_DESKTOP "Build the raylib desktop app (Windows + MinGW, needs raylib)" OFF)
 option(GENISYS_BUILD_PC_DEMO "Build the Windows-only miniaudio test-tone demo" OFF)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
+
+# The engine libraries get linked into the plugin, which is a shared library
+# (.vst3/.component), so they must be position-independent on Linux/macOS.
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # Keep every compiler's warnings on for our own targets, so a warning that
 # only GCC or only MSVC notices still shows up in CI.
@@ -42,6 +52,7 @@ endif()
 # ---- engine: voices, patches, resampling; shared by every front-end -----
 add_library(genisys_engine STATIC
     engine/src/genisys_engine.c
+    engine/src/genisys_presets.c
     engine/src/resampler.c)
 target_include_directories(genisys_engine PUBLIC engine/include)
 target_link_libraries(genisys_engine PUBLIC synth_core)
@@ -90,4 +101,27 @@ if(GENISYS_BUILD_PC_DEMO)
     add_executable(genisys_pc_demo pc/main.c)
     target_include_directories(genisys_pc_demo PRIVATE third_party)
     target_link_libraries(genisys_pc_demo PRIVATE synth_core winmm ole32)
+endif()
+
+# ---- Plugin (JUCE) ------------------------------------------------------------
+if(GENISYS_BUILD_PLUGIN)
+    if(MINGW)
+        message(FATAL_ERROR "JUCE plugins can't be built with MinGW. Use MSVC on Windows.")
+    endif()
+
+    enable_language(CXX)
+    set(CMAKE_CXX_STANDARD 17)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+    set(CMAKE_CXX_EXTENSIONS OFF)
+
+    # JUCE is downloaded at configure time, pinned to an exact release and
+    # checksum so every build (local and CI) uses identical, verified code.
+    include(FetchContent)
+    FetchContent_Declare(JUCE
+        URL https://github.com/juce-framework/JUCE/archive/refs/tags/9.0.2.tar.gz
+        URL_HASH SHA256=16d01c27e8327f3644306cc5c223aa6e21af1cc1ec62faa709fc0dced57d208a
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+    FetchContent_MakeAvailable(JUCE)
+
+    add_subdirectory(plugin)
 endif()
