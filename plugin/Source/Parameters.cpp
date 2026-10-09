@@ -68,6 +68,19 @@ namespace
     juce::String centsLabel (int v) { return juce::String (v) + " cents"; }
     juce::String tenthsHzLabel (int v) { return juce::String (v / 10.0, 1) + " Hz"; }
     juce::String msLabel (int v) { return v == 0 ? juce::String ("Off") : juce::String (v) + " ms"; }
+
+    std::unique_ptr<juce::AudioParameterFloat> floatParam (const juce::String& id, const juce::String& name,
+                                                           float lo, float hi, float def, const juce::String& unit,
+                                                           float step = 0.01f)
+    {
+        return std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { id, kVersion }, name, juce::NormalisableRange<float> (lo, hi, step), def,
+            juce::AudioParameterFloatAttributes().withLabel (unit));
+    }
+
+    // Echo note lengths, in quarter notes.
+    const juce::StringArray kEchoDivisionNames { "1/4", "1/8", "1/8 dotted", "1/16", "1/4 dotted", "1/8 triplet" };
+    constexpr float kEchoDivisionBeats[] = { 1.0f, 0.5f, 0.75f, 0.25f, 1.5f, 1.0f / 3.0f };
     juce::String unisonLabel (int v) { return v == 1 ? juce::String ("Off") : juce::String (v) + " channels"; }
 
     // PSG envelopes step once per 60 Hz frame (~16.7 ms).
@@ -162,6 +175,26 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     layout.add (std::make_unique<juce::AudioParameterChoice> (
         juce::ParameterID { "psg_mode", kVersion }, "PSG Mode",
         juce::StringArray { "Off", "Unison", "Arpeggio" }, psg.mode));
+    // Effects (after the chips): Chorus -> Echo -> Reverb.
+    const genisys::EffectSettings fx;
+    layout.add (boolParam ("chorus_on", "Chorus On", fx.chorusOn));
+    layout.add (floatParam ("chorus_rate", "Chorus Rate", 0.1f, 5.0f, fx.chorusRateHz, "Hz"));
+    layout.add (intParam ("chorus_depth", "Chorus Depth", 0, 100, (int) (fx.chorusDepth * 100.0f), percentLabel));
+    layout.add (intParam ("chorus_mix", "Chorus Mix", 0, 100, (int) (fx.chorusMix * 100.0f), percentLabel));
+    layout.add (boolParam ("echo_on", "Echo On", fx.echoOn));
+    layout.add (boolParam ("echo_sync", "Echo Sync to Tempo", fx.echoSync));
+    layout.add (intParam ("echo_time", "Echo Time (unsynced)", 10, 2000, (int) fx.echoTimeMs, msLabel));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (
+        juce::ParameterID { "echo_division", kVersion }, "Echo Time (synced)", kEchoDivisionNames, 2));
+    layout.add (intParam ("echo_feedback", "Echo Feedback", 0, 95, (int) (fx.echoFeedback * 100.0f), percentLabel));
+    layout.add (intParam ("echo_mix", "Echo Mix", 0, 100, (int) (fx.echoMix * 100.0f), percentLabel));
+    layout.add (boolParam ("echo_pingpong", "Echo Ping-Pong", fx.echoPingPong));
+    layout.add (boolParam ("reverb_on", "Reverb On", fx.reverbOn));
+    layout.add (intParam ("reverb_size", "Reverb Size", 0, 100, (int) (fx.reverbSize * 100.0f), percentLabel));
+    layout.add (intParam ("reverb_damping", "Reverb Damping", 0, 100, (int) (fx.reverbDamping * 100.0f), percentLabel));
+    layout.add (intParam ("reverb_width", "Reverb Width", 0, 100, (int) (fx.reverbWidth * 100.0f), percentLabel));
+    layout.add (intParam ("reverb_mix", "Reverb Mix", 0, 100, (int) (fx.reverbMix * 100.0f), percentLabel));
+
     layout.add (intParam ("psg_level", "PSG Level", 0, 15, psg.level, psgVolumeLabel));
     layout.add (intParam ("psg_octave", "PSG Octave", -2, 2, psg.octave, octaveLabel));
     layout.add (intParam ("psg_attack", "PSG Attack", 0, 15, psg.attack, framesPerStepLabel));
@@ -194,6 +227,14 @@ Snapshot::Snapshot (juce::AudioProcessorValueTreeState& state)
       voiceMode (raw (state, "voice_mode")), glideTime (raw (state, "glide_time")),
       unison (raw (state, "unison")), unisonDetune (raw (state, "unison_detune")),
       unisonStereo (raw (state, "unison_stereo")),
+      chorusOn (raw (state, "chorus_on")), chorusRate (raw (state, "chorus_rate")),
+      chorusDepth (raw (state, "chorus_depth")), chorusMix (raw (state, "chorus_mix")),
+      echoOn (raw (state, "echo_on")), echoSync (raw (state, "echo_sync")), echoTime (raw (state, "echo_time")),
+      echoDivision (raw (state, "echo_division")), echoFeedback (raw (state, "echo_feedback")),
+      echoMix (raw (state, "echo_mix")), echoPingPong (raw (state, "echo_pingpong")),
+      reverbOn (raw (state, "reverb_on")), reverbSize (raw (state, "reverb_size")),
+      reverbDamping (raw (state, "reverb_damping")), reverbWidth (raw (state, "reverb_width")),
+      reverbMix (raw (state, "reverb_mix")),
       psgLevel (raw (state, "psg_level")), noiseOn (raw (state, "noise_on")),
       noiseWhite (raw (state, "noise_white")), noiseRate (raw (state, "noise_rate")),
       noiseVolume (raw (state, "noise_volume")),
@@ -269,6 +310,29 @@ GenisysPsgSettings Snapshot::readPsg() const
     psg.noise_rate = asInt (noiseRate);
     psg.noise_volume = asInt (noiseVolume);
     return psg;
+}
+
+EffectSettings Snapshot::readEffects() const
+{
+    const auto percent = [] (const std::atomic<float>* v) { return (float) asInt (v) / 100.0f; };
+    EffectSettings fx;
+    fx.chorusOn = asInt (chorusOn) != 0;
+    fx.chorusRateHz = chorusRate->load (std::memory_order_relaxed);
+    fx.chorusDepth = percent (chorusDepth);
+    fx.chorusMix = percent (chorusMix);
+    fx.echoOn = asInt (echoOn) != 0;
+    fx.echoSync = asInt (echoSync) != 0;
+    fx.echoTimeMs = (float) asInt (echoTime);
+    fx.echoBeats = kEchoDivisionBeats[juce::jlimit (0, 5, asInt (echoDivision))];
+    fx.echoFeedback = percent (echoFeedback);
+    fx.echoMix = percent (echoMix);
+    fx.echoPingPong = asInt (echoPingPong) != 0;
+    fx.reverbOn = asInt (reverbOn) != 0;
+    fx.reverbSize = percent (reverbSize);
+    fx.reverbDamping = percent (reverbDamping);
+    fx.reverbWidth = percent (reverbWidth);
+    fx.reverbMix = percent (reverbMix);
+    return fx;
 }
 
 GenisysDrumSettings Snapshot::readDrums() const

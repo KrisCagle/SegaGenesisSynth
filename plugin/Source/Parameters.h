@@ -5,6 +5,7 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include "Effects.h"
 #include "genisys_engine.h" // C header with its own extern "C" guards
 
 // Every user-facing control is a host parameter, so it can be automated,
@@ -30,6 +31,7 @@ namespace genisys::params
         GenisysPsgSettings readPsg() const;
         GenisysConsoleSettings readConsole() const;
         GenisysDrumSettings readDrums() const;
+        EffectSettings readEffects() const;
         float masterGainDb() const { return masterGain->load(); }
         int octave() const { return (int) std::lround (octaveShift->load (std::memory_order_relaxed)); }
         int bendRange() const { return (int) std::lround (bendRangeSemis->load (std::memory_order_relaxed)); }
@@ -50,6 +52,12 @@ namespace genisys::params
         std::atomic<float>* bendRangeSemis; std::atomic<float>* vibratoDepth; std::atomic<float>* vibratoRate;
         std::atomic<float>* voiceMode; std::atomic<float>* glideTime; std::atomic<float>* unison;
         std::atomic<float>* unisonDetune; std::atomic<float>* unisonStereo;
+        std::atomic<float>* chorusOn; std::atomic<float>* chorusRate; std::atomic<float>* chorusDepth;
+        std::atomic<float>* chorusMix; std::atomic<float>* echoOn; std::atomic<float>* echoSync;
+        std::atomic<float>* echoTime; std::atomic<float>* echoDivision; std::atomic<float>* echoFeedback;
+        std::atomic<float>* echoMix; std::atomic<float>* echoPingPong; std::atomic<float>* reverbOn;
+        std::atomic<float>* reverbSize; std::atomic<float>* reverbDamping; std::atomic<float>* reverbWidth;
+        std::atomic<float>* reverbMix;
         std::atomic<float>* psgLevel; std::atomic<float>* noiseOn; std::atomic<float>* noiseWhite;
         std::atomic<float>* noiseRate; std::atomic<float>* noiseVolume;
         std::atomic<float>* chipModel; std::atomic<float>* consoleFilter; std::atomic<float>* filterCutoff;

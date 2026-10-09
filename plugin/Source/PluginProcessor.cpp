@@ -34,7 +34,7 @@ GenisysProcessor::GenisysProcessor()
 
 GenisysProcessor::~GenisysProcessor() = default;
 
-void GenisysProcessor::prepareToPlay (double sampleRate, int)
+void GenisysProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     // A fresh engine at the host's rate. Patch and PSG settings are pushed
     // again on the next block.
@@ -42,6 +42,7 @@ void GenisysProcessor::prepareToPlay (double sampleRate, int)
     forceParameterSync = true;
 
     editorMidi.reset (sampleRate);
+    effects.prepare (sampleRate, samplesPerBlock, getTotalNumOutputChannels());
     masterGain.reset (sampleRate, 0.02);
     masterGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (params.masterGainDb()));
 }
@@ -160,9 +161,8 @@ void GenisysProcessor::render (juce::AudioBuffer<float>& buffer, int start, int 
 
         for (int i = 0; i < n; ++i)
         {
-            const float gain = masterGain.getNextValue();
-            const float l = scratchLeft[(size_t) i] * gain;
-            const float r = scratchRight[(size_t) i] * gain;
+            const float l = scratchLeft[(size_t) i];
+            const float r = scratchRight[(size_t) i];
 
             if (channels >= 2)
             {
@@ -211,6 +211,26 @@ void GenisysProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
     }
 
     render (buffer, position, numSamples - position);
+
+    // Effects, then Master Volume (ramped per sample to avoid clicks).
+    if (auto* host = getPlayHead())
+        if (auto hostPosition = host->getPosition())
+            if (auto bpm = hostPosition->getBpm())
+                hostBpm = *bpm;
+    effects.process (buffer, params.readEffects(), hostBpm);
+
+    const int outputs = juce::jmin (2, buffer.getNumChannels());
+    for (int i = 0; i < numSamples; ++i)
+    {
+        const float gain = masterGain.getNextValue();
+        for (int ch = 0; ch < outputs; ++ch)
+            buffer.getWritePointer (ch)[i] *= gain;
+    }
+}
+
+double GenisysProcessor::getTailLengthSeconds() const
+{
+    return genisys::Effects::tailSeconds (params.readEffects());
 }
 
 juce::AudioProcessorEditor* GenisysProcessor::createEditor()
