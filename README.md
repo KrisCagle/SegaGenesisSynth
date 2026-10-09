@@ -1,4 +1,5 @@
 # Genisys
+<img width="749" height="518" alt="image" src="https://github.com/user-attachments/assets/c2bda7b4-472a-4ded-a733-a1a0ee88c6fb" />
 
 A synthesizer that recreates the sound of 16-bit console FM music, built on a cycle-accurate emulation of the **Yamaha YM2612** FM chip and the **SN76489** PSG.
 
