@@ -9,6 +9,12 @@
  * voices can exceed 1.0; that's deliberate (see genisys_engine_render). */
 #define OUTPUT_SCALE (1.0f / 32768.0f)
 
+/* FM/PSG balance. synth-core's PSG swings +/-828 at full volume while one
+ * full FM channel peaks at 8191. Genesis Plus GX, whose mix was tuned
+ * against hardware, plays a full PSG square as 0..2800 at a 150% preamp,
+ * i.e. +/-2100 against the same 8191 FM peak. Match that. */
+#define PSG_MIX_GAIN (2100.0f / 828.0f)
+
 /* YM2612 register layout quirk: operator slots are ordered OP1, OP3, OP2,
  * OP4 in the register map, so logical OP1..OP4 sit at these offsets. */
 static const int OP_REG_OFFSET[4] = { 0, 8, 4, 12 };
@@ -660,8 +666,9 @@ static void clock_native(GenisysEngine *e, float *left, float *right) {
     if (n > 0) psg_sum /= n;
 
     {
-        float l = (float)(fm_l + psg_sum) * OUTPUT_SCALE;
-        float r = (float)(fm_r + psg_sum) * OUTPUT_SCALE;
+        float psg = (float)psg_sum * PSG_MIX_GAIN;
+        float l = ((float)fm_l + psg) * OUTPUT_SCALE;
+        float r = ((float)fm_r + psg) * OUTPUT_SCALE;
 
         /* DC blocker (one-pole high-pass, ~5 Hz). The console's output
          * capacitors do the same job: the ladder effect leaves a constant
