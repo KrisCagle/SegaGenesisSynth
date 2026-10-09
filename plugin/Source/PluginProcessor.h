@@ -36,7 +36,7 @@ public:
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 0.0; }
+    double getTailLengthSeconds() const override;
 
     // Factory presets, exposed through the host's program list.
     int getNumPrograms() override;
@@ -72,6 +72,9 @@ private:
     GenisysConsoleSettings lastConsole {};
     GenisysDrumSettings lastDrums {};
     bool forceParameterSync = true;
+
+    genisys::Effects effects;
+    double hostBpm = 120.0;
 
     juce::SmoothedValue<float> masterGain; // ramps volume changes to avoid clicks
     std::vector<float> scratchLeft, scratchRight;

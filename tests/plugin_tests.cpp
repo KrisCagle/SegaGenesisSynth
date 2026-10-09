@@ -2,6 +2,7 @@
 // processBlock, save/restore state) without needing a DAW.
 
 #include <cmath>
+#include <functional>
 #include <cstdio>
 #include <memory>
 #include <vector>
@@ -261,6 +262,106 @@ namespace
         check (peak (buffer, 0, kBlock) < 1.0e-4f, "a note held across an octave change still stops on key-up");
     }
 
+    // Renders `seconds` of a 0.2 s A4 note (with a quick release) through a
+    // processor, after `configure` has set its parameters.
+    std::vector<float> renderNote (const std::function<void (GenisysProcessor&)>& configure, double seconds)
+    {
+        auto p = makeProcessor();
+        for (int op = 1; op <= 4; ++op)
+            setIntParam (*p, ("op" + juce::String (op) + "_rr").toRawUTF8(), 15);
+        configure (*p);
+
+        juce::AudioBuffer<float> buffer (2, kBlock);
+        juce::MidiBuffer midi;
+        std::vector<float> out;
+        const int blocks = (int) (kRate * seconds) / kBlock;
+        for (int b = 0; b < blocks; ++b)
+        {
+            if (b == 0)
+                midi.addEvent (juce::MidiMessage::noteOn (1, 69, (juce::uint8) 127), 0);
+            if (b == (int) (kRate * 0.2) / kBlock)
+                midi.addEvent (juce::MidiMessage::noteOff (1, 69), 0);
+            process (*p, buffer, midi);
+            for (int i = 0; i < kBlock; ++i)
+                out.push_back (buffer.getSample (0, i));
+        }
+        return out;
+    }
+
+    float rmsOf (const std::vector<float>& x, double from, double to)
+    {
+        double sum = 0.0;
+        const auto a = (size_t) (from * kRate), b = (size_t) (to * kRate);
+        for (auto i = a; i < b; ++i)
+            sum += (double) x[i] * x[i];
+        return (float) std::sqrt (sum / (double) (b - a));
+    }
+
+    void testEffectsOffIsUntouched()
+    {
+        // The same note straight from the engine, with no plugin around it.
+        static GenisysEngine engine;
+        genisys_engine_init (&engine, kRate);
+        std::vector<float> left ((size_t) kRate), right ((size_t) kRate);
+        genisys_engine_note_on (&engine, 69, 127);
+        genisys_engine_render (&engine, left.data(), right.data(), (int) kRate / 2);
+
+        auto p = makeProcessor();
+        juce::AudioBuffer<float> buffer (2, kBlock);
+        juce::MidiBuffer midi;
+        midi.addEvent (juce::MidiMessage::noteOn (1, 69, (juce::uint8) 127), 0);
+        bool identical = true;
+        for (int b = 0; b < (int) (kRate / 2) / kBlock; ++b)
+        {
+            process (*p, buffer, midi);
+            for (int i = 0; i < kBlock; ++i)
+                if (buffer.getSample (0, i) != left[(size_t) (b * kBlock + i)])
+                    identical = false;
+        }
+        check (identical, "with every effect off, the plugin's output is bit-identical to the engine's");
+    }
+
+    void testEcho()
+    {
+        const auto dry = renderNote ([] (GenisysProcessor&) {}, 1.0);
+        const auto wet = renderNote ([] (GenisysProcessor& p)
+        {
+            setIntParam (p, "echo_on", 1);
+            setIntParam (p, "echo_sync", 0);
+            setIntParam (p, "echo_time", 250);
+            setIntParam (p, "echo_feedback", 0);
+            setIntParam (p, "echo_pingpong", 0);
+            setIntParam (p, "echo_mix", 100);
+        }, 1.0);
+
+        std::vector<float> diff (dry.size());
+        for (size_t i = 0; i < dry.size(); ++i)
+            diff[i] = wet[i] - dry[i];
+        check (rmsOf (diff, 0.0, 0.24) < 1.0e-6f, "echo: nothing extra before the 250 ms delay");
+        check (rmsOf (diff, 0.26, 0.45) > 0.01f, "echo: a copy of the note arrives after 250 ms");
+    }
+
+    void testReverbTail()
+    {
+        const auto dry = renderNote ([] (GenisysProcessor&) {}, 1.5);
+        const auto wet = renderNote ([] (GenisysProcessor& p)
+        {
+            setIntParam (p, "reverb_on", 1);
+            setIntParam (p, "reverb_size", 80);
+            setIntParam (p, "reverb_mix", 40);
+        }, 1.5);
+        check (rmsOf (dry, 1.0, 1.4) < 1.0e-4f && rmsOf (wet, 1.0, 1.4) > 1.0e-3f,
+               "reverb: the sound keeps ringing after the dry note has stopped");
+    }
+
+    void testTailLength()
+    {
+        auto p = makeProcessor();
+        const double dryTail = p->getTailLengthSeconds();
+        setIntParam (*p, "reverb_on", 1);
+        check (dryTail == 0.0 && p->getTailLengthSeconds() > 1.0, "the plugin reports a tail to the host only when echo/reverb are on");
+    }
+
     void testMonoOutput()
     {
         auto p = std::make_unique<GenisysProcessor>();
@@ -294,6 +395,10 @@ int main()
     testDrumsOnChannel10();
     testSustainPedal();
     testOctaveShiftReleasesCorrectNote();
+    testEffectsOffIsUntouched();
+    testEcho();
+    testReverbTail();
+    testTailLength();
     testMonoOutput();
 
     if (failures == 0)

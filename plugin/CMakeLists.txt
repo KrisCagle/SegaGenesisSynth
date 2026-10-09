@@ -38,6 +38,7 @@ juce_add_plugin(Genisys
 # target that links them, so they can't share one static library.)
 add_library(GenisysSharedCode INTERFACE)
 target_sources(GenisysSharedCode INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/Effects.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Parameters.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/PluginEditor.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/PluginProcessor.cpp)
@@ -49,6 +50,7 @@ target_compile_definitions(GenisysSharedCode INTERFACE
 target_link_libraries(GenisysSharedCode INTERFACE
     genisys_engine
     juce::juce_audio_utils
+    juce::juce_dsp
     juce::juce_recommended_config_flags
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags)
