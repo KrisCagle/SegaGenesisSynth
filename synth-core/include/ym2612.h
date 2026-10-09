@@ -125,6 +125,22 @@ sample_t ym2612_channel_clock(Ym2612Channel *ch, uint32_t lfo_am, uint32_t lfo_p
  * pairs), plus the global LFO and channel-3's "3-slot" special mode where
  * 3 of its 4 operators can each run at an independent frequency. ---- */
 
+/* How the chip's digital output reaches the speakers.
+ *
+ * The real chips mix channels through a 9-bit DAC, so only the top 9 of each
+ * channel's 14 bits are heard. The original YM2612 (Model 1 consoles) also
+ * has the "ladder effect": while one channel is being output, the DAC holds
+ * the others at a small value on the same side of zero, so positive outputs
+ * gain +4 and negative ones -3 (in 9-bit steps). The two halves don't meet
+ * at zero, which makes quiet notes gritty. That's the sound of the Model 1.
+ * The later YM3438 (Model 2 and onward) fixed the offset but kept 9 bits.
+ * Behaviour per Nuked-OPN2's die-shot-based model (Alexey Khokholov). */
+typedef enum {
+    YM2612_DAC_CLEAN = 0,  /* full 14-bit channel outputs, no DAC artifacts */
+    YM2612_DAC_YM3438 = 1, /* 9-bit DAC, no ladder effect */
+    YM2612_DAC_YM2612 = 2  /* 9-bit DAC with the ladder effect */
+} Ym2612DacMode;
+
 typedef struct {
     Ym2612Channel channel[6];
 
@@ -137,9 +153,18 @@ typedef struct {
     uint8_t  mode;           /* $27: bits 6-7 enable channel-3's 3-slot special mode */
     uint8_t  fn_h_latch;      /* shared high-fnum/block latch for normal ($A4-$A6) freq writes */
     uint8_t  sl3_fn_h_latch;  /* separate latch for 3-slot-mode ($A8-$AE) freq writes */
+
+    /* Channel 6 DAC mode ($2A/$2B): when enabled, channel 6's FM output is
+     * replaced by an 8-bit sample value -- how games played drum samples. */
+    uint8_t  dac_enable;
+    int32_t  dac_value;       /* $2A data as a signed 14-bit channel output */
+
+    Ym2612DacMode dac_mode;   /* output-stage model; not a chip register */
 } Ym2612Chip;
 
-void ym2612_chip_init(Ym2612Chip *chip);
+void ym2612_chip_init(Ym2612Chip *chip); /* dac_mode starts as YM2612_DAC_CLEAN */
+
+void ym2612_chip_set_dac_mode(Ym2612Chip *chip, Ym2612DacMode mode);
 
 /* port: 0 or 1 (the real chip's two address/data port pairs -- port 0 addresses
  * channels 1-3, port 1 addresses channels 4-6, using identical register offsets). */

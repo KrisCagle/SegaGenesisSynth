@@ -195,6 +195,93 @@ static void test_pan_routes_to_correct_stereo_side(void) {
     CHECK(silent_both, "pan=0x00 (both disabled) silences the channel on both sides, even while keyed on");
 }
 
+/* ---- DAC output models and channel-6 DAC mode ---- */
+
+static void clock_n(Ym2612Chip *chip, int n, int32_t *l, int32_t *r) {
+    int i;
+    for (i = 0; i < n; i++) ym2612_chip_clock_wide(chip, l, r);
+}
+
+static void test_dac_modes_on_silence(void) {
+    Ym2612Chip chip;
+    int32_t l, r;
+
+    ym2612_chip_init(&chip);
+    clock_n(&chip, 10, &l, &r);
+    CHECK(l == 0 && r == 0, "clean mode: a silent chip outputs exactly 0");
+
+    ym2612_chip_set_dac_mode(&chip, YM2612_DAC_YM3438);
+    clock_n(&chip, 10, &l, &r);
+    CHECK(l == 0 && r == 0, "YM3438 mode: a silent chip outputs exactly 0 (no ladder offset)");
+
+    ym2612_chip_set_dac_mode(&chip, YM2612_DAC_YM2612);
+    clock_n(&chip, 10, &l, &r);
+    CHECK(l == 6 * 4 * 32 && r == 6 * 4 * 32,
+          "YM2612 mode: each silent channel still adds the +4 ladder offset (6 x 4 steps of 32)");
+}
+
+static void test_dac_mode_quantizes_to_9_bits(void) {
+    Ym2612Chip chip;
+    int i, all_steps = 1, any_sound = 0;
+
+    ym2612_chip_init(&chip);
+    ym2612_chip_set_dac_mode(&chip, YM2612_DAC_YM3438);
+    write_basic_patch(&chip, 0, 0);
+    ym2612_chip_write(&chip, 0, 0x28, 0xF0);
+    for (i = 0; i < 2000; i++) {
+        int32_t l, r;
+        ym2612_chip_clock_wide(&chip, &l, &r);
+        if (l % 32 != 0) all_steps = 0;
+        if (l != 0) any_sound = 1;
+    }
+    CHECK(any_sound && all_steps, "YM3438 mode: output moves in 9-bit steps (multiples of 32)");
+}
+
+static void test_dac_ladder_offsets(void) {
+    Ym2612Chip chip;
+    int32_t l, r;
+
+    /* Drive channel 6 through its DAC register so the input is exact. Pan
+     * channel 6 left-only to see both the "on" and "off" sides. Channels
+     * 1-5 are silent and each contribute +4 * 32 = 128 on both sides. */
+    ym2612_chip_init(&chip);
+    ym2612_chip_set_dac_mode(&chip, YM2612_DAC_YM2612);
+    ym2612_chip_write(&chip, 1, 0xB6, 0x80);      /* channel 6: left only */
+    ym2612_chip_write(&chip, 0, 0x2B, 0x80);      /* DAC on */
+
+    ym2612_chip_write(&chip, 0, 0x2A, 0x80 + 10); /* +10 (8-bit) = +20 in 9-bit steps */
+    clock_n(&chip, 2, &l, &r);
+    CHECK(l == 5 * 128 + (20 + 4) * 32, "ladder: a positive sample gains +4 steps");
+    CHECK(r == 5 * 128 + 4 * 32, "ladder: a channel panned off still leaks +4 on that side");
+
+    ym2612_chip_write(&chip, 0, 0x2A, 0x80 - 10); /* -10 (8-bit) = -20 in 9-bit steps */
+    clock_n(&chip, 2, &l, &r);
+    CHECK(l == 5 * 128 + (-20 - 3) * 32, "ladder: a negative sample loses 3 more steps");
+    CHECK(r == 5 * 128 - 4 * 32, "ladder: a negative channel panned off leaks -4");
+}
+
+static void test_dac_register_replaces_channel_6(void) {
+    Ym2612Chip chip;
+    int32_t l, r;
+
+    ym2612_chip_init(&chip);
+    ym2612_chip_write(&chip, 0, 0x2A, 0xFF);
+    clock_n(&chip, 2, &l, &r);
+    CHECK(l == 0, "$2A alone does nothing until the DAC is enabled");
+
+    ym2612_chip_write(&chip, 0, 0x2B, 0x80);
+    clock_n(&chip, 2, &l, &r);
+    CHECK(l == (0xFF - 0x80) * 64 && r == l, "$2B bit 7 makes channel 6 output the $2A sample");
+
+    ym2612_chip_write(&chip, 1, 0x2B, 0x00); /* port 1 has no $2B */
+    clock_n(&chip, 2, &l, &r);
+    CHECK(l == (0xFF - 0x80) * 64, "DAC registers only exist on port 0");
+
+    ym2612_chip_write(&chip, 0, 0x2B, 0x00);
+    clock_n(&chip, 2, &l, &r);
+    CHECK(l == 0, "clearing $2B bit 7 returns channel 6 to FM");
+}
+
 int main(void) {
     test_register_writes_route_to_correct_channel();
     test_physical_slot_order_maps_to_correct_logical_operator();
@@ -202,6 +289,10 @@ int main(void) {
     test_channel3_special_mode_independent_frequencies();
     test_lfo_pm_changes_output_over_time();
     test_pan_routes_to_correct_stereo_side();
+    test_dac_modes_on_silence();
+    test_dac_mode_quantizes_to_9_bits();
+    test_dac_ladder_offsets();
+    test_dac_register_replaces_channel_6();
 
     if (g_failures == 0) {
         printf("\nAll tests passed.\n");

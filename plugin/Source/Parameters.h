@@ -28,6 +28,7 @@ namespace genisys::params
 
         GenisysPatch readPatch() const;
         GenisysPsgSettings readPsg() const;
+        GenisysConsoleSettings readConsole() const;
         float masterGainDb() const { return masterGain->load(); }
 
     private:
@@ -45,6 +46,7 @@ namespace genisys::params
         std::atomic<float>* velocitySens; std::atomic<float>* masterGain;
         std::atomic<float>* psgLevel; std::atomic<float>* noiseOn; std::atomic<float>* noiseWhite;
         std::atomic<float>* noiseRate; std::atomic<float>* noiseVolume;
+        std::atomic<float>* chipModel; std::atomic<float>* consoleFilter; std::atomic<float>* filterCutoff;
         std::array<OpParams, 4> ops;
     };
 

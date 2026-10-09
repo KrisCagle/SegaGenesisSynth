@@ -116,6 +116,23 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
         layout.add (intParam (opId (op, "ssg_mode"), name ("SSG-EG Shape"), 0, 7, o.ssg_mode));
     }
 
+    // The console's sound path after the chip (see GenisysConsoleSettings).
+    const GenisysConsoleSettings console = genisys_default_console();
+    layout.add (std::make_unique<juce::AudioParameterChoice> (
+        juce::ParameterID { "chip_model", kVersion }, "Chip",
+        juce::StringArray { "YM2612 (Model 1, gritty)", "YM3438 (Model 2, cleaner)", "Clean (no DAC)" },
+        console.chip_model));
+    layout.add (boolParam ("console_filter", "Console Filter On", console.filter_on != 0));
+    {
+        juce::NormalisableRange<float> range (1000.0f, 20000.0f, 1.0f);
+        range.setSkewForCentre (4000.0f);
+        layout.add (std::make_unique<juce::AudioParameterFloat> (
+            juce::ParameterID { "filter_cutoff", kVersion }, "Console Filter Cutoff", range,
+            (float) console.filter_hz,
+            juce::AudioParameterFloatAttributes().withLabel ("Hz").withStringFromValueFunction (
+                [] (float v, int) { return v >= 1000.0f ? juce::String (v / 1000.0f, 2) + " kHz" : juce::String ((int) v) + " Hz"; })));
+    }
+
     layout.add (intParam ("psg_level", "PSG Level", 0, 15, 0));
     layout.add (boolParam ("noise_on", "Noise On", false));
     layout.add (std::make_unique<juce::AudioParameterChoice> (
@@ -135,7 +152,9 @@ Snapshot::Snapshot (juce::AudioProcessorValueTreeState& state)
       velocitySens (raw (state, "velocity_sens")), masterGain (raw (state, "master_gain")),
       psgLevel (raw (state, "psg_level")), noiseOn (raw (state, "noise_on")),
       noiseWhite (raw (state, "noise_white")), noiseRate (raw (state, "noise_rate")),
-      noiseVolume (raw (state, "noise_volume"))
+      noiseVolume (raw (state, "noise_volume")),
+      chipModel (raw (state, "chip_model")), consoleFilter (raw (state, "console_filter")),
+      filterCutoff (raw (state, "filter_cutoff"))
 {
     for (int op = 0; op < 4; ++op)
     {
@@ -187,6 +206,15 @@ GenisysPsgSettings Snapshot::readPsg() const
     psg.noise_rate = asInt (noiseRate);
     psg.noise_volume = asInt (noiseVolume);
     return psg;
+}
+
+GenisysConsoleSettings Snapshot::readConsole() const
+{
+    GenisysConsoleSettings console {};
+    console.chip_model = asInt (chipModel);
+    console.filter_on = asInt (consoleFilter);
+    console.filter_hz = (double) filterCutoff->load (std::memory_order_relaxed);
+    return console;
 }
 
 void applyPatch (juce::AudioProcessorValueTreeState& state, const GenisysPatch& patch)

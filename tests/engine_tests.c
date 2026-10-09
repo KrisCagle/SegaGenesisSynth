@@ -242,6 +242,108 @@ static void test_velocity_only_touches_carriers(void) {
     CHECK(car_ok, "velocity lowers carrier levels (they set the volume)");
 }
 
+/* ---- Console output stage: DAC model, DC blocker, filter ---- */
+
+static void start_console(double rate, const GenisysPatch *p, int model, int filter_on) {
+    GenisysConsoleSettings c = genisys_default_console();
+    c.chip_model = model;
+    c.filter_on = filter_on;
+    start(rate, p);
+    genisys_engine_set_console(&g_engine, &c);
+}
+
+static void test_default_console_is_model1(void) {
+    GenisysConsoleSettings c = genisys_default_console();
+    CHECK(c.chip_model == GENISYS_CHIP_YM2612 && c.filter_on && c.filter_hz == GENISYS_MODEL1_FILTER_HZ,
+          "default console: YM2612 (ladder effect) with the Model 1-style filter");
+}
+
+static void test_ladder_offset_never_reaches_output(void) {
+    GenisysPatch p = sine_patch();
+    int i, frames = 48000;
+    float worst = 0.0f;
+
+    start_console(48000.0, &p, GENISYS_CHIP_YM2612, 1);
+    genisys_engine_render(&g_engine, g_left, g_right, frames);
+    for (i = 0; i < frames; i++) if (fabsf(g_left[i]) > worst) worst = fabsf(g_left[i]);
+    CHECK(worst == 0.0f, "YM2612 mode: silence is exactly 0 (the ladder's DC offset is blocked)");
+
+    genisys_engine_note_on(&g_engine, 69, 127);
+    genisys_engine_render(&g_engine, g_left, g_right, 4800);
+    genisys_engine_note_off(&g_engine, 69);
+    genisys_engine_render(&g_engine, g_left, g_right, frames);
+    worst = 0.0f;
+    for (i = frames - 4800; i < frames; i++) if (fabsf(g_left[i]) > worst) worst = fabsf(g_left[i]);
+    CHECK(worst < 1e-3f, "YM2612 mode: output settles back to 0 after a note ends");
+}
+
+/* Relative size of the difference between the YM2612 and YM3438 renders
+ * of the same note: how much the ladder effect changes it. */
+static double ladder_distortion(int tl) {
+    GenisysPatch p = sine_patch();
+    int frames = 24000, i;
+    double diff = 0.0, ref = 0.0;
+
+    p.op[3].tl = tl;
+    start_console(48000.0, &p, GENISYS_CHIP_YM3438, 0);
+    genisys_engine_note_on(&g_engine, 57, 127);
+    genisys_engine_render(&g_engine, g_left, g_right, frames);   /* clean-ish reference in g_left */
+
+    start_console(48000.0, &p, GENISYS_CHIP_YM2612, 0);
+    genisys_engine_note_on(&g_engine, 57, 127);
+    genisys_engine_render(&g_engine, g_right, g_right + MAX_FRAMES / 2, frames); /* ladder version in g_right */
+
+    for (i = 4800; i < frames; i++) {
+        double d = (double)g_right[i] - g_left[i];
+        diff += d * d;
+        ref += (double)g_left[i] * g_left[i];
+    }
+    return sqrt(diff / ref);
+}
+
+static void test_ladder_effect_hits_quiet_notes(void) {
+    double loud = ladder_distortion(0);
+    double quiet = ladder_distortion(40);
+    char msg[160];
+
+    snprintf(msg, sizeof msg, "ladder effect barely changes a loud note (%.1f%% difference, want < 5%%)", loud * 100.0);
+    CHECK(loud < 0.05, msg);
+    snprintf(msg, sizeof msg, "ladder effect strongly distorts a quiet note (%.0f%% difference, want > 30%%)", quiet * 100.0);
+    CHECK(quiet > 0.30, msg);
+}
+
+static double filter_gain_db(int note) {
+    GenisysPatch p = sine_patch();
+    int frames = 24000;
+    double off, on;
+
+    start_console(48000.0, &p, GENISYS_CHIP_CLEAN, 0);
+    genisys_engine_note_on(&g_engine, note, 127);
+    genisys_engine_render(&g_engine, g_left, g_right, frames);
+    off = rms(g_left, 4800, frames);
+
+    start_console(48000.0, &p, GENISYS_CHIP_CLEAN, 1);
+    genisys_engine_note_on(&g_engine, note, 127);
+    genisys_engine_render(&g_engine, g_left, g_right, frames);
+    on = rms(g_left, 4800, frames);
+    return 20.0 * log10(on / off);
+}
+
+static void test_console_filter_response(void) {
+    /* A first-order low-pass at fc attenuates f by 10*log10(1 + (f/fc)^2) dB. */
+    static const int NOTES[] = { 57, 81, 99, 111 };
+    int i;
+    for (i = 0; i < 4; i++) {
+        double f = note_hz(NOTES[i]);
+        double want = -10.0 * log10(1.0 + pow(f / GENISYS_MODEL1_FILTER_HZ, 2.0));
+        double got = filter_gain_db(NOTES[i]);
+        char msg[160];
+        snprintf(msg, sizeof msg, "console filter at %.0f Hz: %.2f dB (first-order 3.68 kHz curve says %.2f, within 0.5)",
+                 f, got, want);
+        CHECK(fabs(got - want) < 0.5, msg);
+    }
+}
+
 int main(void) {
     genisys_engine_global_init();
 
@@ -254,6 +356,10 @@ int main(void) {
     test_same_note_retriggers_same_voice();
     test_velocity();
     test_velocity_only_touches_carriers();
+    test_default_console_is_model1();
+    test_ladder_offset_never_reaches_output();
+    test_ladder_effect_hits_quiet_notes();
+    test_console_filter_response();
 
     if (g_failures == 0) {
         printf("\nAll tests passed.\n");
