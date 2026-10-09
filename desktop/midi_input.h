@@ -6,8 +6,9 @@
  * `Rectangle` and `CloseWindow`, so this header (and its .c file) must
  * never be included alongside raylib.h in the same file. */
 
-typedef void (*MidiNoteOnCallback)(int note_id, double freq_hz);
-typedef void (*MidiNoteOffCallback)(int note_id);
+/* note: MIDI note number 0-127. velocity: 1-127. */
+typedef void (*MidiNoteOnCallback)(int note, int velocity);
+typedef void (*MidiNoteOffCallback)(int note);
 
 /* Opens the first available MIDI-in device, if any. Always returns a
  * non-NULL, short human-readable status string for display (device name,

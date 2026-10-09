@@ -54,6 +54,13 @@ typedef struct {
     uint32_t eg_cnt;      /* envelope generator's own counter, wraps 4096 -> 1 (matches real chip) */
 } Ym2612Operator;
 
+/* Builds the shared sine/exponential/detune/LFO lookup tables. Every *_init
+ * function below calls this lazily, but that lazy path is not thread-safe:
+ * a program that may create chips from more than one thread (e.g. a plugin
+ * host loading several instances at once) must call this once, up front,
+ * from a single thread. Safe to call more than once. */
+void ym2612_init_tables(void);
+
 void ym2612_operator_init(Ym2612Operator *op);
 
 void ym2612_operator_set_dt_mul(Ym2612Operator *op, uint8_t reg_value);
@@ -137,5 +144,12 @@ void ym2612_chip_write(Ym2612Chip *chip, int port, uint8_t addr, uint8_t data);
 /* advance one native FM sample; mixes all 6 channels into separate left/right
  * outputs, honoring each channel's pan bits (milestone 2d). */
 void ym2612_chip_clock(Ym2612Chip *chip, sample_t *out_left, sample_t *out_right);
+
+/* Same as ym2612_chip_clock, but returns the raw 6-channel sums without
+ * clamping to 16 bits. Each channel is already limited to the chip's 14-bit
+ * range, so the sum fits easily in 32 bits. The real console mixes channels
+ * in the analog domain, where loud chords never hard-clip -- use this when
+ * the output stage has more headroom than int16. */
+void ym2612_chip_clock_wide(Ym2612Chip *chip, int32_t *out_left, int32_t *out_right);
 
 #endif /* YM2612_H */
