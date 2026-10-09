@@ -3,6 +3,10 @@
 
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* Shared across all chip cores in synth-core/. This header must stay free of
  * any platform-specific includes (no stdio, no OS audio APIs) so the same
  * cores compile unmodified for both the PC prototype and, later, the GBA. */
@@ -22,5 +26,9 @@ static inline int16_t clamp_s16(int32_t v) {
     if (v < INT16_MIN) return INT16_MIN;
     return (int16_t)v;
 }
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* CHIP_TYPES_H */

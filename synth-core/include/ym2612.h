@@ -3,6 +3,10 @@
 
 #include "chip_types.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* YM2612 FM synthesizer -- milestone 2a scope: a single operator's phase
  * generator + envelope generator + log-domain sine/exp synthesis, driven
  * directly rather than through the full 6-channel/8-algorithm register map
@@ -151,5 +155,9 @@ void ym2612_chip_clock(Ym2612Chip *chip, sample_t *out_left, sample_t *out_right
  * in the analog domain, where loud chords never hard-clip -- use this when
  * the output stage has more headroom than int16. */
 void ym2612_chip_clock_wide(Ym2612Chip *chip, int32_t *out_left, int32_t *out_right);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* YM2612_H */
