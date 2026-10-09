@@ -4,7 +4,6 @@
 #include <windows.h>
 #include <mmsystem.h>
 
-#include <math.h>
 #include <stdio.h>
 
 static HMIDIIN g_midi_in = NULL;
@@ -12,9 +11,8 @@ static char g_status[64] = "No MIDI device";
 static MidiNoteOnCallback g_on_cb = NULL;
 static MidiNoteOffCallback g_off_cb = NULL;
 
-/* Runs on a Windows multimedia thread, not the UI or audio thread. Calls
- * straight into the app's note_on/note_off, same "no lock, plain integer
- * writes" simplification already used for the raylib audio callback. */
+/* Runs on a Windows multimedia thread, not the UI or audio thread. The
+ * callbacks only queue events for the audio thread (see desktop/main.c). */
 static void CALLBACK MidiInProc(HMIDIIN h, UINT wMsg, DWORD_PTR inst, DWORD_PTR param1, DWORD_PTR param2) {
     (void)h;
     (void)inst;
@@ -27,15 +25,10 @@ static void CALLBACK MidiInProc(HMIDIIN h, UINT wMsg, DWORD_PTR inst, DWORD_PTR 
         unsigned char data2 = (unsigned char)((msg >> 16) & 0xFF);
         unsigned char type = (unsigned char)(status & 0xF0);
 
-        /* MIDI note-id space is 0-127; offset by 1000 so it never collides
-         * with the app's QWERTY/mouse piano ids (0-12). */
         if (type == 0x90 && data2 > 0) {
-            if (g_on_cb) {
-                double freq = 440.0 * pow(2.0, (data1 - 69) / 12.0);
-                g_on_cb(1000 + data1, freq);
-            }
+            if (g_on_cb) g_on_cb(data1, data2);
         } else if (type == 0x80 || (type == 0x90 && data2 == 0)) {
-            if (g_off_cb) g_off_cb(1000 + data1);
+            if (g_off_cb) g_off_cb(data1);
         }
     }
 }

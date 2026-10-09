@@ -12,6 +12,11 @@ A synthesizer that recreates the sound of 16-bit console FM music, built on a cy
   - SSG-EG, LFO (vibrato and tremolo), detune, and channel-3 special mode
   - written in plain C with no OS dependencies
 - **SN76489 PSG core:** 3 square-wave channels plus periodic/white noise.
+- **Engine** (`engine/`): the layer every front-end shares.
+  - 6-voice allocation, with oldest-voice stealing that doesn't cut off release tails
+  - MIDI note and velocity handling
+  - patch application
+  - a band-limited resampler that converts the chip's native ~53 kHz output to any host sample rate
 - **Desktop app** (`desktop/`, Windows): a raylib prototype with an on-screen keyboard, MIDI input, operator editing and WAV recording. The plugin's Standalone app will replace it.
 - **Nintendo DS port** (`nds/`): proof that the core runs on real, constrained hardware.
 
@@ -29,14 +34,15 @@ Optional targets:
 
 | Option | What it builds |
 |---|---|
-| `-DGENISYS_BUILD_DESKTOP=ON` | raylib desktop app (Windows, needs raylib) |
+| `-DGENISYS_BUILD_DESKTOP=ON` | raylib desktop app (Windows with MinGW/GCC, needs raylib from MSYS2) |
 | `-DGENISYS_BUILD_PC_DEMO=ON` | miniaudio test-tone demo (Windows) |
 
 ## Project layout
 
 ```
-synth-core/   chip emulation (YM2612, SN76489): platform-independent C
-tests/        unit tests for the cores, run through CTest
+synth-core/   chip emulation (YM2612, SN76489): platform-independent integer C
+engine/       voices, patches, MIDI, resampling: shared by every front-end
+tests/        unit tests for the cores and the engine, run through CTest
 desktop/      raylib prototype app
 pc/           headless test-tone demo
 nds/          Nintendo DS port (devkitPro, built separately)
