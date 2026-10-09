@@ -12,3 +12,8 @@ nds/build/
 
 .claude/
 .vs/
+
+# CMake / IDE build trees
+out/
+build-*/
+CMakeUserPresets.json
