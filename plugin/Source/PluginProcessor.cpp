@@ -66,6 +66,14 @@ void GenisysProcessor::syncParametersToEngine()
         lastPsg = psg;
     }
 
+    const GenisysConsoleSettings console = params.readConsole();
+    if (forceParameterSync || console.chip_model != lastConsole.chip_model
+        || console.filter_on != lastConsole.filter_on || console.filter_hz != lastConsole.filter_hz)
+    {
+        genisys_engine_set_console (engine.get(), &console);
+        lastConsole = console;
+    }
+
     forceParameterSync = false;
 }
 

@@ -76,6 +76,14 @@ GenisysPatch genisys_default_patch(void) {
     return p;
 }
 
+GenisysConsoleSettings genisys_default_console(void) {
+    GenisysConsoleSettings c;
+    c.chip_model = GENISYS_CHIP_YM2612;
+    c.filter_on = 1;
+    c.filter_hz = GENISYS_MODEL1_FILTER_HZ;
+    return c;
+}
+
 /* ---- Register writes ---- */
 
 static void chip_write_channel(GenisysEngine *e, int voice, uint8_t base_reg, uint8_t data) {
@@ -166,7 +174,32 @@ void genisys_engine_init(GenisysEngine *e, double sample_rate) {
     }
     genisys_engine_set_patch(e, &e->patch);
     apply_psg_noise(e);
+    e->dc_coeff = (float)exp(-2.0 * 3.14159265358979323846 * 5.0 / YM2612_SAMPLE_HZ);
+    {
+        GenisysConsoleSettings c = genisys_default_console();
+        genisys_engine_set_console(e, &c);
+    }
     genisys_engine_set_sample_rate(e, sample_rate);
+}
+
+void genisys_engine_set_console(GenisysEngine *e, const GenisysConsoleSettings *settings) {
+    static const Ym2612DacMode DAC_MODE[3] = { YM2612_DAC_YM2612, YM2612_DAC_YM3438, YM2612_DAC_CLEAN };
+    double hz = settings->filter_hz;
+    int model = settings->chip_model;
+
+    if (model < 0 || model > 2) model = GENISYS_CHIP_YM2612;
+    if (model != e->console.chip_model || !e->dc_primed) {
+        /* The ladder effect's constant offset changes with the model: let the
+         * DC blocker settle on the new level instead of producing a thump. */
+        e->dc_primed = 0;
+    }
+    e->console = *settings;
+    e->console.chip_model = model;
+    ym2612_chip_set_dac_mode(&e->chip, DAC_MODE[model]);
+
+    if (hz < 20.0) hz = 20.0;
+    if (hz > YM2612_SAMPLE_HZ * 0.45) hz = YM2612_SAMPLE_HZ * 0.45;
+    e->lp_coeff = (float)exp(-2.0 * 3.14159265358979323846 * hz / YM2612_SAMPLE_HZ);
 }
 
 void genisys_engine_set_sample_rate(GenisysEngine *e, double sample_rate) {
@@ -308,8 +341,47 @@ static void clock_native(GenisysEngine *e, float *left, float *right) {
     for (k = 0; k < n; k++) psg_sum += psg_clock(&e->psg);
     if (n > 0) psg_sum /= n;
 
-    *left = (float)(fm_l + psg_sum) * OUTPUT_SCALE;
-    *right = (float)(fm_r + psg_sum) * OUTPUT_SCALE;
+    {
+        float l = (float)(fm_l + psg_sum) * OUTPUT_SCALE;
+        float r = (float)(fm_r + psg_sum) * OUTPUT_SCALE;
+
+        /* DC blocker (one-pole high-pass, ~5 Hz). The console's output
+         * capacitors do the same job: the ladder effect leaves a constant
+         * offset even in silence, which would otherwise reach the DAW. Primed
+         * with the first sample so a fresh instance starts silent. */
+        if (!e->dc_primed) {
+            e->dc_x_l = l; e->dc_x_r = r;
+            e->dc_y_l = 0.0f; e->dc_y_r = 0.0f;
+            e->dc_primed = 1;
+        }
+        e->dc_y_l = l - e->dc_x_l + e->dc_coeff * e->dc_y_l;
+        e->dc_y_r = r - e->dc_x_r + e->dc_coeff * e->dc_y_r;
+        e->dc_x_l = l;
+        e->dc_x_r = r;
+        l = e->dc_y_l;
+        r = e->dc_y_r;
+
+        /* Console low-pass: first order, like an RC filter. */
+        if (e->console.filter_on) {
+            e->lp_l = l + e->lp_coeff * (e->lp_l - l);
+            e->lp_r = r + e->lp_coeff * (e->lp_r - r);
+            l = e->lp_l;
+            r = e->lp_r;
+        } else {
+            e->lp_l = l;
+            e->lp_r = r;
+        }
+
+        /* Flush tiny values so long silences can't decay into denormals,
+         * which are very slow on most CPUs. */
+        if (fabsf(e->dc_y_l) < 1e-20f) e->dc_y_l = 0.0f;
+        if (fabsf(e->dc_y_r) < 1e-20f) e->dc_y_r = 0.0f;
+        if (fabsf(e->lp_l) < 1e-20f) e->lp_l = 0.0f;
+        if (fabsf(e->lp_r) < 1e-20f) e->lp_r = 0.0f;
+
+        *left = l;
+        *right = r;
+    }
 }
 
 void genisys_engine_render(GenisysEngine *e, float *out_left, float *out_right, int frames) {

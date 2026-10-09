@@ -68,6 +68,25 @@ typedef struct {
     int noise_volume; /* 0-15 */
 } GenisysPsgSettings;
 
+/* The console's sound path after the chip. */
+typedef enum {
+    GENISYS_CHIP_YM2612 = 0, /* Model 1: 9-bit DAC with the gritty "ladder effect" */
+    GENISYS_CHIP_YM3438 = 1, /* Model 2 and later: 9-bit DAC, ladder effect fixed */
+    GENISYS_CHIP_CLEAN = 2   /* no DAC artifacts: full 14-bit channel output */
+} GenisysChipModel;
+
+typedef struct {
+    int chip_model;   /* GenisysChipModel */
+    int filter_on;    /* 0/1: console output low-pass filter */
+    double filter_hz; /* cutoff of the first-order (6 dB/octave) low-pass */
+} GenisysConsoleSettings;
+
+/* Default cutoff: ~3.68 kHz, first order. No hardware measurement of the
+ * Model 1 filter has been published; this is the corner the Mega Amp
+ * replacement board uses to imitate the Model 1, which matches reports
+ * that the Model 1 filter is first order. Adjustable for that reason. */
+#define GENISYS_MODEL1_FILTER_HZ 3680.0
+
 typedef enum {
     GENISYS_VOICE_FREE = 0,  /* never used, or released and fully silent */
     GENISYS_VOICE_HELD,      /* key down */
@@ -92,6 +111,14 @@ typedef struct {
     double psg_ticks_per_fm_sample;
     double psg_tick_accum;
 
+    /* Output stage, run at the chip's native rate before resampling. */
+    GenisysConsoleSettings console;
+    float dc_coeff;            /* DC blocker pole (~5 Hz): the console's output capacitors */
+    float dc_x_l, dc_x_r, dc_y_l, dc_y_r;
+    int dc_primed;
+    float lp_coeff;            /* low-pass pole for console.filter_hz */
+    float lp_l, lp_r;
+
     GenisysResampler resampler;
     double sample_rate;
 } GenisysEngine;
@@ -108,6 +135,7 @@ void genisys_engine_set_sample_rate(GenisysEngine *e, double sample_rate);
 /* Applies to all voices immediately, including notes already sounding. */
 void genisys_engine_set_patch(GenisysEngine *e, const GenisysPatch *patch);
 void genisys_engine_set_psg(GenisysEngine *e, const GenisysPsgSettings *settings);
+void genisys_engine_set_console(GenisysEngine *e, const GenisysConsoleSettings *settings);
 
 /* note: MIDI note number (60 = middle C). velocity: 1-127. */
 void genisys_engine_note_on(GenisysEngine *e, int note, int velocity);
@@ -122,6 +150,9 @@ void genisys_engine_render(GenisysEngine *e, float *out_left, float *out_right, 
 /* ---- Helpers, exposed for front-ends and tests ---- */
 
 GenisysPatch genisys_default_patch(void);
+
+/* YM2612 (Model 1) with the console filter on: the classic sound. */
+GenisysConsoleSettings genisys_default_console(void);
 
 /* Converts a MIDI note to the chip's (block, fnum) frequency registers. */
 void genisys_note_to_block_fnum(int note, int *block, int *fnum);

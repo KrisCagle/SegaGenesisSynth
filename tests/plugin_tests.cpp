@@ -140,13 +140,15 @@ namespace
         setIntParam (*a, "algorithm", 5);
         setIntParam (*a, "op2_tl", 42);
         setIntParam (*a, "velocity_sens", 77);
+        setIntParam (*a, "chip_model", GENISYS_CHIP_YM3438);
 
         juce::MemoryBlock saved;
         a->getStateInformation (saved);
 
         auto b = makeProcessor();
         b->setStateInformation (saved.getData(), (int) saved.getSize());
-        check (intParam (*b, "algorithm") == 5 && intParam (*b, "op2_tl") == 42 && intParam (*b, "velocity_sens") == 77,
+        check (intParam (*b, "algorithm") == 5 && intParam (*b, "op2_tl") == 42 && intParam (*b, "velocity_sens") == 77
+                   && intParam (*b, "chip_model") == GENISYS_CHIP_YM3438,
                "saved state restores every parameter (what a DAW project does on reopen)");
     }
 
