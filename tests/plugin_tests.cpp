@@ -362,6 +362,43 @@ namespace
         check (dryTail == 0.0 && p->getTailLengthSeconds() > 1.0, "the plugin reports a tail to the host only when echo/reverb are on");
     }
 
+    void testPatchFiles()
+    {
+        // A TFI file built from the documented layout: algorithm 6,
+        // feedback 5, OP4 (last in the file) with TL 7.
+        juce::MemoryBlock tfi (42, true);
+        auto* bytes = static_cast<uint8_t*> (tfi.getData());
+        bytes[0] = 6;
+        bytes[1] = 5;
+        for (int slot = 0; slot < 4; ++slot)
+        {
+            bytes[2 + slot * 10 + 0] = 1;  // MUL
+            bytes[2 + slot * 10 + 1] = 3;  // DT: none
+            bytes[2 + slot * 10 + 2] = (uint8_t) (slot == 3 ? 7 : 40);
+            bytes[2 + slot * 10 + 4] = 31; // AR
+            bytes[2 + slot * 10 + 7] = 8;  // RR
+        }
+        auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("genisys_plugin_tests");
+        dir.createDirectory();
+        const auto in = dir.getChildFile ("test.tfi");
+        in.replaceWithData (tfi.getData(), tfi.getSize());
+
+        auto p = makeProcessor();
+        setIntParam (*p, "voice_mode", GENISYS_MODE_LEGATO);
+        const auto error = p->importPatchFile (in);
+        check (error.isEmpty() && intParam (*p, "algorithm") == 6 && intParam (*p, "feedback") == 5
+                   && intParam (*p, "op4_tl") == 7,
+               "loading a .tfi file sets the FM parameters");
+        check (intParam (*p, "voice_mode") == GENISYS_MODE_LEGATO, "loading a patch keeps the performance settings");
+
+        const auto out = dir.getChildFile ("saved.tfi");
+        juce::MemoryBlock saved;
+        check (p->exportPatchFile (out).isEmpty() && out.loadFileAsData (saved) && saved == tfi,
+               "saving writes the same TFI bytes back");
+        check (p->importPatchFile (dir.getChildFile ("missing.tfi")).isNotEmpty(), "a missing file reports an error");
+        dir.deleteRecursively();
+    }
+
     void testMonoOutput()
     {
         auto p = std::make_unique<GenisysProcessor>();
@@ -399,6 +436,7 @@ int main()
     testEcho();
     testReverbTail();
     testTailLength();
+    testPatchFiles();
     testMonoOutput();
 
     if (failures == 0)

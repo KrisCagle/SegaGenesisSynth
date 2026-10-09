@@ -54,6 +54,7 @@ endif()
 add_library(genisys_engine STATIC
     engine/src/genisys_drums.c
     engine/src/genisys_engine.c
+    engine/src/genisys_patch_io.c
     engine/src/genisys_presets.c
     engine/src/genisys_psg.c
     engine/src/resampler.c)
@@ -75,10 +76,12 @@ if(GENISYS_BUILD_TESTS)
         add_test(NAME ${test_name} COMMAND ${test_name})
     endforeach()
 
-    add_executable(engine_tests tests/engine_tests.c)
-    target_link_libraries(engine_tests PRIVATE genisys_engine)
-    genisys_set_warnings(engine_tests)
-    add_test(NAME engine_tests COMMAND engine_tests)
+    foreach(test_name engine_tests patch_io_tests)
+        add_executable(${test_name} tests/${test_name}.c)
+        target_link_libraries(${test_name} PRIVATE genisys_engine)
+        genisys_set_warnings(${test_name})
+        add_test(NAME ${test_name} COMMAND ${test_name})
+    endforeach()
 endif()
 
 # ---- Tools -------------------------------------------------------------------

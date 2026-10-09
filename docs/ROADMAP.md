@@ -85,6 +85,19 @@ The core reproduces the YM2612 **chip** accurately, but the Genesis **sound** al
 - **Patch import/export** in the community formats (**TFI** from TFM Music Maker, **DMP** from DefleMask, **VGI**, later **FUI** from Furnace). This opens up thousands of existing Genesis instruments.
 - **Undo/redo** and **A/B compare**.
 
+**Status (Phase 4):**
+
+| Item | Status |
+|---|---|
+| Velocity | Done in Phase 1 |
+| Pitch bend, mod wheel (vibrato), sustain pedal | Done, plus an Octave control and on-screen Bend/Mod wheels |
+| Voice modes | Done: Poly / Mono / Legato, glide, and stereo Unison 1–3 using the chip's hard panning |
+| Stereo pan | Done through Unison Stereo |
+| Patch import/export | Done: TFI, VGI and DMP in; TFI out |
+| Effects | Added at Kris's request: chorus, tempo-synced echo, reverb |
+| Undo/redo and A/B compare | Moved to Phase 5, since they belong in the new editor |
+| Channel-3 special mode | Not planned. Unison delivers the same "fat" sound on every channel. |
+
 ## 5. Presets
 
 The target is about **80–100 factory presets** in categories, all designed from scratch. I won't copy them from game rips, and preset names won't use game titles or trademarks.

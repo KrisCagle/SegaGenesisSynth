@@ -45,6 +45,11 @@ public:
     const juce::String getProgramName (int index) override;
     void changeProgramName (int, const juce::String&) override {}
 
+    // Community patch files (.tfi / .vgi / .dmp in, .tfi out). Message
+    // thread only. Return an empty string on success, else the reason.
+    juce::String importPatchFile (const juce::File& file);
+    juce::String exportPatchFile (const juce::File& file);
+
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 

@@ -32,6 +32,16 @@ GenisysEditor::GenisysEditor (GenisysProcessor& p)
     drumsButton.onClick = [this] { setKeyboardToDrums (drumsButton.getToggleState()); };
     addAndMakeVisible (drumsButton);
 
+    loadButton.setTooltip ("Load a Genesis FM patch: .tfi (TFM Music Maker), .vgi (VGM Music Maker) or .dmp (DefleMask)");
+    saveButton.setTooltip ("Save the current FM sound as a .tfi file other Genesis tools can open");
+    loadButton.onClick = [this] { loadPatch(); };
+    saveButton.onClick = [this] { savePatch(); };
+    addAndMakeVisible (loadButton);
+    addAndMakeVisible (saveButton);
+    status.setFont (juce::FontOptions (13.0f));
+    status.setColour (juce::Label::textColourId, juce::Colours::lightgrey);
+    addAndMakeVisible (status);
+
     octaveDown.onClick = [this] { shiftOctave (-1); };
     octaveUp.onClick = [this] { shiftOctave (1); };
     octaveLabel.setJustificationType (juce::Justification::centred);
@@ -83,8 +93,8 @@ GenisysEditor::GenisysEditor (GenisysProcessor& p)
     startTimerHz (10); // keep the octave readout in sync with automation/presets
 
     setResizable (true, true);
-    setResizeLimits (640, 420, 2000, 1600);
-    setSize (820, 640);
+    setResizeLimits (760, 420, 2400, 1600);
+    setSize (980, 680);
 }
 
 void GenisysEditor::setKeyboardToDrums (bool drums)
@@ -101,6 +111,38 @@ void GenisysEditor::setKeyboardToDrums (bool drums)
     if (drums)
         if (auto* drumsOn = genisys.state.getParameter ("drums_on"))
             drumsOn->setValueNotifyingHost (1.0f);
+}
+
+void GenisysEditor::loadPatch()
+{
+    chooser = std::make_unique<juce::FileChooser> ("Load a Genesis FM patch", juce::File(), "*.tfi;*.vgi;*.dmp");
+    chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                          [this] (const juce::FileChooser& fc)
+                          {
+                              const auto file = fc.getResult();
+                              if (file == juce::File())
+                                  return;
+                              const auto error = genisys.importPatchFile (file);
+                              status.setText (error.isEmpty() ? "Loaded " + file.getFileName() : error,
+                                              juce::dontSendNotification);
+                          });
+}
+
+void GenisysEditor::savePatch()
+{
+    chooser = std::make_unique<juce::FileChooser> ("Save as a TFI patch", juce::File(), "*.tfi");
+    chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
+                              | juce::FileBrowserComponent::warnAboutOverwriting,
+                          [this] (const juce::FileChooser& fc)
+                          {
+                              auto file = fc.getResult();
+                              if (file == juce::File())
+                                  return;
+                              file = file.withFileExtension (".tfi");
+                              const auto error = genisys.exportPatchFile (file);
+                              status.setText (error.isEmpty() ? "Saved " + file.getFileName() : error,
+                                              juce::dontSendNotification);
+                          });
 }
 
 void GenisysEditor::sendToProcessor (const juce::MidiMessage& message)
@@ -150,8 +192,13 @@ void GenisysEditor::resized()
     auto top = area.removeFromTop (kTopBarHeight).reduced (8, 6);
     presetLabel.setBounds (top.removeFromLeft (60));
     presetBox.setBounds (top.removeFromLeft (180));
-    top.removeFromLeft (16);
-    drumsButton.setBounds (top.removeFromLeft (280));
+    top.removeFromLeft (8);
+    loadButton.setBounds (top.removeFromLeft (100));
+    top.removeFromLeft (4);
+    saveButton.setBounds (top.removeFromLeft (100));
+    top.removeFromLeft (12);
+    drumsButton.setBounds (top.removeFromLeft (260));
+    status.setBounds (top);
 
     auto bottom = area.removeFromBottom (kKeyboardHeight + 28);
     auto controls = bottom.removeFromTop (28).reduced (8, 3);

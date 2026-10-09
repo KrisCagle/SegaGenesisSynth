@@ -3,6 +3,7 @@
 
 #include <cstring>
 
+#include "genisys_patch_io.h"
 #include "genisys_presets.h"
 
 namespace
@@ -256,6 +257,34 @@ const juce::String GenisysProcessor::getProgramName (int index)
 {
     const char* name = genisys_preset_name (index);
     return name != nullptr ? juce::String (name) : juce::String();
+}
+
+juce::String GenisysProcessor::importPatchFile (const juce::File& file)
+{
+    juce::MemoryBlock data;
+    if (! file.loadFileAsData (data))
+        return "Couldn't read " + file.getFileName() + ".";
+
+    // Start from the current patch so performance settings (voice mode,
+    // vibrato, velocity...) survive; the file supplies the FM sound.
+    GenisysPatch patch = params.readPatch();
+    const auto result = genisys_patch_import (static_cast<const uint8_t*> (data.getData()), data.getSize(),
+                                              file.getFileName().toRawUTF8(), &patch);
+    if (result != GENISYS_PATCH_OK)
+        return genisys_patch_result_text (result);
+
+    genisys::params::applyPatch (state, patch);
+    return {};
+}
+
+juce::String GenisysProcessor::exportPatchFile (const juce::File& file)
+{
+    const GenisysPatch patch = params.readPatch();
+    uint8_t bytes[GENISYS_TFI_SIZE];
+    const auto size = genisys_patch_export_tfi (&patch, bytes);
+    if (! file.replaceWithData (bytes, size))
+        return "Couldn't write " + file.getFileName() + ".";
+    return {};
 }
 
 void GenisysProcessor::getStateInformation (juce::MemoryBlock& destData)

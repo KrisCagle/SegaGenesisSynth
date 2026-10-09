@@ -22,12 +22,17 @@ private:
     void timerCallback() override;
     void setKeyboardToDrums (bool drums);
     void shiftOctave (int delta);
+    void loadPatch();
+    void savePatch();
 
     GenisysProcessor& genisys;
 
     juce::Label presetLabel { {}, "Preset" };
     juce::ComboBox presetBox;
     juce::ToggleButton drumsButton { "Keyboard plays drums (MIDI ch 10)" };
+    juce::TextButton loadButton { "Load Patch..." }, saveButton { "Save Patch..." };
+    juce::Label status;
+    std::unique_ptr<juce::FileChooser> chooser;
 
     juce::TextButton octaveDown { "Oct -" }, octaveUp { "Oct +" };
     juce::Label octaveLabel;
