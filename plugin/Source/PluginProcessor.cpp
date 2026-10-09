@@ -1,4 +1,5 @@
 #include "PluginProcessor.h"
+#include "PluginEditor.h"
 
 #include <cstring>
 
@@ -141,6 +142,8 @@ void GenisysProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
     for (int ch = 2; ch < buffer.getNumChannels(); ++ch)
         buffer.clear (ch, 0, buffer.getNumSamples());
 
+    keyboardState.processNextMidiBuffer (midi, 0, buffer.getNumSamples(), true);
+
     syncParametersToEngine();
     masterGain.setTargetValue (juce::Decibels::decibelsToGain (params.masterGainDb()));
 
@@ -162,9 +165,7 @@ void GenisysProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
 
 juce::AudioProcessorEditor* GenisysProcessor::createEditor()
 {
-    // Temporary: the host-style list of every parameter. The themed editor
-    // replaces this in Phase 5 of the roadmap.
-    return new juce::GenericAudioProcessorEditor (*this);
+    return new GenisysEditor (*this);
 }
 
 int GenisysProcessor::getNumPrograms()
