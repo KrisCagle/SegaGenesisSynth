@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 #include <memory>
+#include <vector>
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_events/juce_events.h>
@@ -149,6 +150,43 @@ namespace
                "saved state restores every parameter (what a DAW project does on reopen)");
     }
 
+    // What pluginval's "Plugin state restoration" test does: hosts may send
+    // in-between values (e.g. from automation curves), and reloading a saved
+    // state must put every parameter back exactly.
+    void testStateRestoresInBetweenValues()
+    {
+        auto p = makeProcessor();
+        juce::Random random (1234);
+        auto& params = p->getParameters();
+
+        for (auto* param : params)
+            param->setValueNotifyingHost (random.nextFloat());
+
+        std::vector<float> saved;
+        for (auto* param : params)
+            saved.push_back (param->getValue());
+
+        juce::MemoryBlock state;
+        p->getStateInformation (state);
+
+        for (auto* param : params)
+            param->setValueNotifyingHost (random.nextFloat());
+
+        p->setStateInformation (state.getData(), (int) state.getSize());
+
+        bool allRestored = true;
+        for (int i = 0; i < params.size(); ++i)
+        {
+            if (std::abs (params[i]->getValue() - saved[(size_t) i]) > 0.001f)
+            {
+                std::printf ("  not restored: %s (%.3f -> %.3f)\n", params[i]->getName (64).toRawUTF8(),
+                             saved[(size_t) i], params[i]->getValue());
+                allRestored = false;
+            }
+        }
+        check (allRestored, "every parameter restores exactly, even after in-between host values");
+    }
+
     void testProgramChange()
     {
         auto p = makeProcessor();
@@ -188,6 +226,7 @@ int main()
     testNoteOffReleases();
     testParameterChangesSound();
     testStateRoundTrip();
+    testStateRestoresInBetweenValues();
     testProgramChange();
     testMonoOutput();
 

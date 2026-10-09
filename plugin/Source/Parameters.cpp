@@ -17,9 +17,25 @@ namespace
         return std::make_unique<juce::AudioParameterInt> (juce::ParameterID { id, kVersion }, name, lo, hi, def, attributes);
     }
 
-    std::unique_ptr<juce::AudioParameterBool> boolParam (const juce::String& id, const juce::String& name, bool def)
+    // An on/off switch. Built on a two-choice parameter rather than
+    // juce::AudioParameterBool because AudioParameterBool keeps whatever
+    // in-between value a host sends (e.g. 0.37 from an automation curve)
+    // while saving it as plain "off"; reloading that state then leaves the
+    // stale 0.37 in place. A choice parameter snaps every value to Off/On.
+    class SwitchParameter final : public juce::AudioParameterChoice
     {
-        return std::make_unique<juce::AudioParameterBool> (juce::ParameterID { id, kVersion }, name, def);
+    public:
+        SwitchParameter (const juce::String& id, const juce::String& name, bool def)
+            : AudioParameterChoice (juce::ParameterID { id, kVersion }, name, juce::StringArray { "Off", "On" }, def ? 1 : 0)
+        {
+        }
+
+        bool isBoolean() const override { return true; } // hosts show it as a toggle
+    };
+
+    std::unique_ptr<juce::AudioParameterChoice> boolParam (const juce::String& id, const juce::String& name, bool def)
+    {
+        return std::make_unique<SwitchParameter> (id, name, def);
     }
 
     // Shows register values in the units a musician thinks in, while the
