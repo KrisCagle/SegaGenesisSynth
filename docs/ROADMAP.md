@@ -60,6 +60,18 @@ The core reproduces the YM2612 **chip** accurately, but the Genesis **sound** al
 6. **Channel-3 special mode in the UI.** Each operator gets its own pitch, which is good for detuned "fat" chorus sounds and FM percussion. The core already supports it.
 7. **Mix calibration.** Balance FM against PSG, and the overall level, against hardware recordings. Also give the mix proper headroom so 6 loud voices don't clip (bug #4).
 
+**Status (Phase 3):**
+
+| Item | Status |
+|---|---|
+| 1 | Done: chip model switch (YM2612 / YM3438 / Clean), following Nuked-OPN2's DAC model |
+| 2 | Done: first-order low-pass, adjustable. The default 3.68 kHz is the Mega Amp's Model 1-imitation corner, because no hardware measurement has been published. |
+| 3 | Done in Phase 1 |
+| 4 | Done: DAC drum kit on MIDI channel 10, plus PSG noise hats and cymbals |
+| 5 | Done: PSG layer in Off / Unison / Arpeggio modes, with frame-stepped ADSR and octave shift |
+| 6 | Moved to Phase 4 (voice modes). Channel-3 mode only exists on one channel, so it fits a mono/unison mode rather than 6-voice poly. |
+| 7 | Partly done: headroom is fixed. The FM-to-PSG balance still needs checking against hardware recordings. |
+
 ## 4. Playability: features a musician expects
 
 - **Velocity** controls carrier volume. It's algorithm-aware, so only operators that reach the output get louder. A sensitivity knob set to 0 gives fully authentic behaviour.
@@ -72,6 +84,19 @@ The core reproduces the YM2612 **chip** accurately, but the Genesis **sound** al
 - **Per-patch stereo:** real hardware panning is L / C / R, with an optional "spread voices" mode.
 - **Patch import/export** in the community formats (**TFI** from TFM Music Maker, **DMP** from DefleMask, **VGI**, later **FUI** from Furnace). This opens up thousands of existing Genesis instruments.
 - **Undo/redo** and **A/B compare**.
+
+**Status (Phase 4):**
+
+| Item | Status |
+|---|---|
+| Velocity | Done in Phase 1 |
+| Pitch bend, mod wheel (vibrato), sustain pedal | Done, plus an Octave control and on-screen Bend/Mod wheels |
+| Voice modes | Done: Poly / Mono / Legato, glide, and stereo Unison 1–3 using the chip's hard panning |
+| Stereo pan | Done through Unison Stereo |
+| Patch import/export | Done: TFI, VGI and DMP in; TFI out |
+| Effects | Added at Kris's request: chorus, tempo-synced echo, reverb |
+| Undo/redo and A/B compare | Moved to Phase 5, since they belong in the new editor |
+| Channel-3 special mode | Not planned. Unison delivers the same "fat" sound on every channel. |
 
 ## 5. Presets
 

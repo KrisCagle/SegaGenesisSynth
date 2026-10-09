@@ -31,6 +31,17 @@ Then rescan plugins in your DAW. `Genisys.vst3` is a folder; copy the whole fold
   - MIDI note and velocity handling
   - patch application
   - a band-limited resampler that converts the chip's native ~53 kHz output to any host sample rate
+- **The console's sound path:**
+  - the YM2612's 9-bit DAC and its gritty "ladder effect" (switchable to the cleaner YM3438 or a fully clean output)
+  - a Model 1-style output filter
+- **Drum kit on MIDI channel 10:**
+  - 8-bit kick, snare, clap and tom samples played through FM channel 6's DAC, as Genesis games did. They're synthesized, not recorded.
+  - hi-hats and cymbals on the PSG noise channel
+- **PSG layer:** the square-wave channels can double your FM notes or play a chiptune arpeggio, with envelopes that step at 60 Hz like the original sound drivers.
+- **Playing:** velocity, pitch bend, mod-wheel vibrato and sustain pedal; Poly, Mono and Legato modes with glide; stereo Unison; an Octave shift.
+- **Effects:** chorus, echo (tempo-synced, ping-pong) and reverb.
+- **Patch files:** load community Genesis patches (`.tfi`, `.vgi`, `.dmp`) and save your sounds as `.tfi`.
+- **Demo renderer** (`tools/genisys_render`): writes demo WAVs, so you can hear the engine without a DAW.
 - **Desktop app** (`desktop/`, Windows): a raylib prototype with an on-screen keyboard, MIDI input, operator editing and WAV recording. The plugin's Standalone app will replace it.
 - **Nintendo DS port** (`nds/`): proof that the core runs on real, constrained hardware.
 
