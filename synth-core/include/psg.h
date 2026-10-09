@@ -3,6 +3,10 @@
 
 #include "chip_types.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* SN76489 PSG emulation (3 tone channels + 1 noise channel), as used
  * alongside the YM2612 in the Genesis/Mega Drive. Platform-independent:
  * no I/O, no timing source of its own — the caller clocks it one internal
@@ -29,5 +33,9 @@ typedef struct {
 void psg_reset(Psg *psg);
 void psg_write(Psg *psg, uint8_t value);
 sample_t psg_clock(Psg *psg); /* advance one internal tick, return mixed sample */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* PSG_H */

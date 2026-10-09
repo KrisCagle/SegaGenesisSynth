@@ -21,6 +21,7 @@
 #include "raylib.h"
 
 #include "genisys_engine.h"
+#include "genisys_presets.h"
 #include "midi_input.h" /* no windows.h in this file -- see midi_input.h for why */
 
 #define SCREEN_W 1150
@@ -151,59 +152,6 @@ static GenisysPatch effective_patch(void) {
     }
     return p;
 }
-
-/* Fills in the common defaults (d2r/KS/SSG off) so the presets below only
- * list the fields they care about. */
-static GenisysOperatorParams mk_op(int mul, int dt, int tl, int ar, int d1r, int sl, int rr) {
-    GenisysOperatorParams o = { 0 };
-    o.mul = mul; o.dt = dt; o.tl = tl; o.ar = ar; o.d1r = d1r; o.sl = sl; o.rr = rr;
-    return o;
-}
-
-static GenisysPatch make_patch(int algo, int fb, GenisysOperatorParams o1, GenisysOperatorParams o2,
-                               GenisysOperatorParams o3, GenisysOperatorParams o4) {
-    GenisysPatch p = genisys_default_patch();
-    p.algorithm = algo;
-    p.feedback = fb;
-    p.op[0] = o1; p.op[1] = o2; p.op[2] = o3; p.op[3] = o4;
-    return p;
-}
-
-/* A handful of starting points -- FM's parameter space is huge, so these
- * are hand-picked to land somewhere recognizable; tweak from here by ear. */
-static GenisysPatch preset_epiano(void) {
-    return make_patch(4, 0, mk_op(1, 4, 8, 31, 8, 3, 7), mk_op(1, 4, 2, 27, 6, 3, 6),
-                      mk_op(2, 4, 16, 31, 12, 3, 8), mk_op(1, 4, 10, 27, 8, 3, 7));
-}
-static GenisysPatch preset_bass(void) {
-    return make_patch(0, 3, mk_op(1, 4, 28, 31, 14, 6, 10), mk_op(2, 4, 32, 31, 14, 6, 10),
-                      mk_op(1, 4, 20, 31, 10, 4, 9), mk_op(1, 4, 4, 31, 8, 2, 9));
-}
-static GenisysPatch preset_bell(void) {
-    return make_patch(5, 0, mk_op(1, 7, 8, 31, 6, 2, 6), mk_op(1, 4, 6, 31, 4, 1, 5),
-                      mk_op(2, 4, 14, 31, 6, 2, 6), mk_op(3, 4, 20, 31, 8, 3, 7));
-}
-static GenisysPatch preset_brass(void) {
-    return make_patch(4, 2, mk_op(1, 4, 18, 25, 10, 4, 9), mk_op(1, 4, 6, 22, 8, 3, 8),
-                      mk_op(1, 4, 22, 25, 10, 4, 9), mk_op(1, 4, 8, 22, 8, 3, 8));
-}
-static GenisysPatch preset_lead(void) {
-    return make_patch(2, 4, mk_op(3, 4, 26, 31, 12, 5, 9), mk_op(1, 4, 20, 31, 10, 4, 8),
-                      mk_op(1, 4, 14, 31, 10, 4, 8), mk_op(1, 4, 6, 31, 8, 3, 8));
-}
-
-typedef struct {
-    const char *name;
-    GenisysPatch (*make)(void);
-} PresetDef;
-
-static const PresetDef PRESETS[5] = {
-    { "E.PIANO", preset_epiano },
-    { "BASS", preset_bass },
-    { "BELL", preset_bell },
-    { "BRASS", preset_brass },
-    { "LEAD", preset_lead }
-};
 
 /* ---- Piano keyboard: one octave, mouse-clickable + tracker-style QWERTY,
  * shiftable up/down across a few extra octaves. ---- */
@@ -547,10 +495,10 @@ int main(void) {
         patch_changed |= Toggle((Rectangle){ 830, 55, 130, 28 }, "AM ENABLE", &g_am_enable);
 
         /* Presets */
-        for (i = 0; i < 5; i++) {
-            Rectangle b = (Rectangle){ 660.0f + i * 96, 178, 90, 22 };
-            if (Button(b, PRESETS[i].name, 0)) {
-                g_patch = PRESETS[i].make();
+        for (i = 0; i < genisys_preset_count() && i < 6; i++) {
+            Rectangle b = (Rectangle){ 660.0f + i * 78, 178, 72, 22 };
+            if (Button(b, genisys_preset_name(i), 0)) {
+                g_patch = genisys_preset_patch(i);
                 patch_changed = 1;
             }
         }

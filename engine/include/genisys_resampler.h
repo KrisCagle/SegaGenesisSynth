@@ -1,6 +1,10 @@
 #ifndef GENISYS_RESAMPLER_H
 #define GENISYS_RESAMPLER_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* Band-limited stereo resampler: converts the chip's native ~53,267 Hz
  * stream to whatever rate the host runs at (44.1k, 48k, 96k, ...).
  *
@@ -43,5 +47,9 @@ void genisys_resampler_push(GenisysResampler *rs, float left, float right);
 
 /* Call only when genisys_resampler_needed() returns 0. */
 void genisys_resampler_read(GenisysResampler *rs, float *left, float *right);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* GENISYS_RESAMPLER_H */
