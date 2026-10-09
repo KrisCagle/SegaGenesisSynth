@@ -36,6 +36,8 @@ Unzip it first. The plugin files are folders (`Genisys.vst3`, `Genisys.component
    xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/Genisys.vst3 ~/Library/Audio/Plug-Ins/Components/Genisys.component
    ```
 3. Open your DAW and rescan plugins.
+   - **Logic Pro:** if Genisys shows as failed, open **Logic Pro → Settings → Plug-in Manager**, select Genisys and click **Reset & Rescan Selection**.
+   - **Ableton Live:** in **Settings → Plug-Ins**, turn on **Use Audio Units v2** and/or **Use VST3 Plug-In System Folders**, then **Rescan**.
 
 ### Linux
 1. Copy `Genisys.vst3` into `~/.vst3/` (create the folder if it doesn't exist).
@@ -54,7 +56,9 @@ Unzip it first. The plugin files are folders (`Genisys.vst3`, `Genisys.component
 ## Run the Standalone app (no DAW needed)
 
 - **Windows:** double-click `Genisys.exe`. If SmartScreen warns that the app is unrecognised, click **More info → Run anyway**. This happens because the build isn't code-signed.
-- **macOS:** move `Genisys.app` to Applications, then **right-click → Open** the first time.
+- **macOS:** move `Genisys.app` to Applications. The app isn't signed with an Apple developer certificate yet, so macOS blocks it the first time. Do one of these:
+  - Run `xattr -dr com.apple.quarantine /Applications/Genisys.app` in Terminal, or
+  - try to open it once, then go to **System Settings → Privacy & Security** and click **Open Anyway**. On macOS 14 and earlier, **right-click → Open** also works.
 - **Linux:** run `./Genisys` (you may need `chmod +x Genisys` first).
 
 **Using a MIDI keyboard with the Standalone:** click **Options** (top-left) → **Audio/MIDI Settings**, then tick your keyboard under **Active MIDI inputs**. You can also choose your audio output there. Without a keyboard, click the on-screen piano or use your computer keys (see below).
