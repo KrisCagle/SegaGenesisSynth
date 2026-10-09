@@ -7,7 +7,11 @@
  *                             with a PSG arpeggio, and the drum kit -- three
  *                             engines mixed, like three plugin instances
  *   genisys_chip_compare.wav  one bass riff three times: YM2612 (Model 1),
- *                             YM3438 (Model 2), then Clean with no filter */
+ *                             YM3438 (Model 2), then Clean with no filter
+ *   genisys_preset_tour.wav   every factory preset playing a short phrase
+ *                             suited to it, with genisys_preset_tour.txt
+ *                             listing when each one starts. Effects are a
+ *                             plugin feature, so the tour plays them dry. */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -200,10 +204,98 @@ static void render_chip_compare(const char *dir) {
     free(right);
 }
 
+/* ---- Preset tour ---- */
+
+#define TOUR_SECONDS_PER_PRESET 2.0
+
+typedef struct { double at; int note; double length; } TourNote;
+
+/* A short phrase that shows off a preset, picked by its category. */
+static int tour_phrase(const char *category, TourNote *out) {
+    int n = 0, i;
+#define ADD(t, nt, len) do { out[n].at = (t); out[n].note = (nt); out[n].length = (len); n++; } while (0)
+    if (strcmp(category, "Bass") == 0) {
+        static const int RIFF[8] = { 40, 40, 52, 40, 43, 43, 55, 47 };
+        for (i = 0; i < 8; i++) ADD(i * 0.18, RIFF[i], 0.14);
+    } else if (strcmp(category, "Lead") == 0 || strcmp(category, "Brass & Winds") == 0) {
+        static const int MELODY[5] = { 67, 69, 71, 74, 72 };
+        for (i = 0; i < 4; i++) ADD(i * 0.22, MELODY[i], 0.2);
+        ADD(0.88, MELODY[4], 0.8);
+    } else if (strcmp(category, "Bells & Mallets") == 0 || strcmp(category, "Plucks") == 0) {
+        static const int ARP[6] = { 60, 64, 67, 72, 67, 76 };
+        for (i = 0; i < 6; i++) ADD(i * 0.2, ARP[i], 0.18);
+    } else if (strcmp(category, "FM Percussion") == 0 || strcmp(category, "SFX") == 0) {
+        ADD(0.0, 48, 0.4);
+        ADD(0.5, 55, 0.4);
+        ADD(1.0, 60, 0.6);
+    } else if (strcmp(category, "Guitar") == 0) {
+        ADD(0.0, 40, 0.5); ADD(0.0, 47, 0.5); ADD(0.0, 52, 0.5);
+        ADD(0.6, 43, 0.9); ADD(0.6, 50, 0.9); ADD(0.6, 55, 0.9);
+    } else {
+        /* Keys, organs, pads, chip, init: a held chord. */
+        ADD(0.0, 60, 1.5); ADD(0.0, 64, 1.5); ADD(0.0, 67, 1.5);
+    }
+#undef ADD
+    return n;
+}
+
+static void render_preset_tour(const char *dir) {
+    static GenisysEngine e;
+    const int count = genisys_preset_count();
+    const int per = (int)(RATE * TOUR_SECONDS_PER_PRESET);
+    const int frames = count * per;
+    float *left = calloc((size_t)frames, sizeof(float));
+    float *right = calloc((size_t)frames, sizeof(float));
+    char path[1024];
+    FILE *index_file;
+    int i;
+
+    snprintf(path, sizeof path, "%s/genisys_preset_tour.txt", dir);
+    index_file = fopen(path, "w");
+
+    for (i = 0; i < count; i++) {
+        TourNote notes[16];
+        GenisysPatch patch = genisys_preset_patch(i);
+        GenisysPsgSettings psg = genisys_preset_psg(i);
+        int n = tour_phrase(genisys_preset_category(i), notes), k, pos = 0;
+        int base = i * per;
+
+        genisys_engine_init(&e, RATE);
+        genisys_engine_set_patch(&e, &patch);
+        genisys_engine_set_psg(&e, &psg);
+
+        /* Step through the phrase in 10 ms slices, starting and stopping
+         * notes on time. */
+        while (pos < per) {
+            int slice = RATE / 100;
+            double t = (double)pos / RATE;
+            for (k = 0; k < n; k++) {
+                if (notes[k].at >= t && notes[k].at < t + 0.01) genisys_engine_note_on(&e, notes[k].note, 100);
+                if (notes[k].at + notes[k].length >= t && notes[k].at + notes[k].length < t + 0.01) {
+                    genisys_engine_note_off(&e, notes[k].note);
+                }
+            }
+            if (pos + slice > per) slice = per - pos;
+            mix_in(&e, left + base + pos, right + base + pos, slice, 1.0f);
+            pos += slice;
+        }
+        if (index_file) {
+            fprintf(index_file, "%5.1fs  %-18s %s\n", (double)base / RATE, genisys_preset_category(i), genisys_preset_name(i));
+        }
+    }
+    if (index_file) fclose(index_file);
+
+    snprintf(path, sizeof path, "%s/genisys_preset_tour.wav", dir);
+    printf("%s %s\n", write_wav(path, left, right, frames) ? "wrote" : "FAILED to write", path);
+    free(left);
+    free(right);
+}
+
 int main(int argc, char **argv) {
     const char *dir = argc > 1 ? argv[1] : ".";
     genisys_engine_global_init();
     render_demo(dir);
     render_chip_compare(dir);
+    render_preset_tour(dir);
     return 0;
 }

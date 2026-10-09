@@ -1,5 +1,7 @@
 #include "Parameters.h"
 
+#include "genisys_presets.h"
+
 namespace genisys::params
 {
 namespace
@@ -350,6 +352,44 @@ GenisysConsoleSettings Snapshot::readConsole() const
     console.filter_on = asInt (consoleFilter);
     console.filter_hz = (double) filterCutoff->load (std::memory_order_relaxed);
     return console;
+}
+
+void applyPreset (juce::AudioProcessorValueTreeState& state, int index)
+{
+    const auto set = [&state] (const juce::String& id, float value)
+    {
+        if (auto* param = state.getParameter (id))
+            param->setValueNotifyingHost (param->convertTo0to1 (value));
+    };
+
+    applyPatch (state, genisys_preset_patch (index));
+
+    const GenisysPsgSettings psg = genisys_preset_psg (index);
+    set ("psg_mode", (float) psg.mode);
+    set ("psg_level", (float) psg.level);
+    set ("psg_octave", (float) psg.octave);
+    set ("psg_attack", (float) psg.attack);
+    set ("psg_decay", (float) psg.decay);
+    set ("psg_sustain", (float) psg.sustain);
+    set ("psg_release", (float) psg.release);
+    set ("psg_arp_speed", (float) psg.arp_speed);
+    set ("noise_on", (float) psg.noise_on);
+
+    const GenisysPresetFx fx = genisys_preset_fx (index);
+    const EffectSettings defaults;
+    set ("chorus_on", fx.chorus_mix > 0 ? 1.0f : 0.0f);
+    set ("chorus_mix", (float) (fx.chorus_mix > 0 ? fx.chorus_mix : (int) (defaults.chorusMix * 100.0f)));
+    set ("chorus_rate", defaults.chorusRateHz);
+    set ("chorus_depth", defaults.chorusDepth * 100.0f);
+    set ("echo_on", fx.echo_mix > 0 ? 1.0f : 0.0f);
+    set ("echo_sync", 1.0f);
+    set ("echo_mix", (float) (fx.echo_mix > 0 ? fx.echo_mix : (int) (defaults.echoMix * 100.0f)));
+    set ("echo_feedback", (float) fx.echo_feedback);
+    set ("echo_division", (float) fx.echo_division);
+    set ("echo_pingpong", 1.0f);
+    set ("reverb_on", fx.reverb_mix > 0 ? 1.0f : 0.0f);
+    set ("reverb_mix", (float) (fx.reverb_mix > 0 ? fx.reverb_mix : (int) (defaults.reverbMix * 100.0f)));
+    set ("reverb_size", (float) fx.reverb_size);
 }
 
 void applyPatch (juce::AudioProcessorValueTreeState& state, const GenisysPatch& patch)

@@ -86,9 +86,15 @@ endif()
 
 # ---- Tools -------------------------------------------------------------------
 if(GENISYS_BUILD_TOOLS)
-    add_executable(genisys_render tools/genisys_render.c)
-    target_link_libraries(genisys_render PRIVATE genisys_engine)
-    genisys_set_warnings(genisys_render)
+    foreach(tool_name genisys_render preset_levels)
+        add_executable(${tool_name} tools/${tool_name}.c)
+        target_link_libraries(${tool_name} PRIVATE genisys_engine)
+        genisys_set_warnings(${tool_name})
+        if(MSVC)
+            # fopen is standard C; MSVC's suggested fopen_s is Windows-only.
+            target_compile_definitions(${tool_name} PRIVATE _CRT_SECURE_NO_WARNINGS)
+        endif()
+    endforeach()
 endif()
 
 # ---- raylib desktop app (to be replaced by the plugin's Standalone app) --

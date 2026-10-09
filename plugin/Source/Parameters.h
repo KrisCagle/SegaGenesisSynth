@@ -70,4 +70,9 @@ namespace genisys::params
     // Sets every patch parameter from a GenisysPatch, notifying the host
     // (used when loading a factory preset). Message thread only.
     void applyPatch (juce::AudioProcessorValueTreeState& state, const GenisysPatch& patch);
+
+    // Loads factory preset `index`: its sound and performance settings, PSG
+    // layer and effects. Global settings (Master Volume, Octave, bend range,
+    // chip model, console filter, drums) are left as they are. Message thread.
+    void applyPreset (juce::AudioProcessorValueTreeState& state, int index);
 }
