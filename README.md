@@ -38,6 +38,9 @@ Then rescan plugins in your DAW. `Genisys.vst3` is a folder; copy the whole fold
   - 8-bit kick, snare, clap and tom samples played through FM channel 6's DAC, as Genesis games did. They're synthesized, not recorded.
   - hi-hats and cymbals on the PSG noise channel
 - **PSG layer:** the square-wave channels can double your FM notes or play a chiptune arpeggio, with envelopes that step at 60 Hz like the original sound drivers.
+- **Playing:** velocity, pitch bend, mod-wheel vibrato and sustain pedal; Poly, Mono and Legato modes with glide; stereo Unison; an Octave shift.
+- **Effects:** chorus, echo (tempo-synced, ping-pong) and reverb.
+- **Patch files:** load community Genesis patches (`.tfi`, `.vgi`, `.dmp`) and save your sounds as `.tfi`.
 - **Demo renderer** (`tools/genisys_render`): writes demo WAVs, so you can hear the engine without a DAW.
 - **Desktop app** (`desktop/`, Windows): a raylib prototype with an on-screen keyboard, MIDI input, operator editing and WAV recording. The plugin's Standalone app will replace it.
 - **Nintendo DS port** (`nds/`): proof that the core runs on real, constrained hardware.
