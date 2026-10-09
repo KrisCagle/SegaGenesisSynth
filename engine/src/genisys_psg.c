@@ -5,6 +5,7 @@
 #include "engine_internal.h"
 
 #include <math.h>
+#include <stddef.h>
 
 /* ---- Register writes (the real SN76489 latch/data byte protocol) ---- */
 
