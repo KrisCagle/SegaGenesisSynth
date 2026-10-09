@@ -1,4 +1,5 @@
 #include "genisys_engine.h"
+#include "engine_internal.h"
 
 #include <math.h>
 #include <string.h>
@@ -20,10 +21,17 @@ static float g_velocity_att[128];
 void genisys_engine_global_init(void) {
     int v;
     ym2612_init_tables();
+    genisys_drums_init();
     g_velocity_att[0] = 127.0f;
     for (v = 1; v < 128; v++) {
         g_velocity_att[v] = (float)(40.0 * log10(127.0 / v) / 0.75);
     }
+}
+
+float engine_velocity_gain(int velocity) {
+    if (velocity < 1) return 0.0f;
+    if (velocity > 127) velocity = 127;
+    return (float)pow(10.0, -0.75 * g_velocity_att[velocity] / 20.0);
 }
 
 uint8_t genisys_carrier_mask(int algorithm) {
@@ -136,26 +144,6 @@ static void key(GenisysEngine *e, int voice, int on) {
     ym2612_chip_write(&e->chip, 0, 0x28, (uint8_t)(chan_bits | (on ? 0xF0 : 0x00)));
 }
 
-/* ---- PSG helpers (the real SN76489 latch/data byte protocol) ---- */
-
-static void psg_tone(GenisysEngine *e, int channel, double hz) {
-    int n = (int)(PSG_CLOCK_HZ / (32.0 * hz) + 0.5);
-    if (n > 0x3FF) n = 0x3FF;
-    if (n < 1) n = 1;
-    psg_write(&e->psg, (uint8_t)(0x80 | (channel << 5) | (n & 0x0F)));
-    psg_write(&e->psg, (uint8_t)((n >> 4) & 0x3F));
-}
-
-static void psg_volume(GenisysEngine *e, int channel, int attenuation) {
-    psg_write(&e->psg, (uint8_t)(0x80 | (channel << 5) | 0x10 | (attenuation & 0x0F)));
-}
-
-static void apply_psg_noise(GenisysEngine *e) {
-    const GenisysPsgSettings *s = &e->psg_settings;
-    psg_write(&e->psg, (uint8_t)(0x80 | (3 << 5) | (s->noise_white ? 0x04 : 0) | (s->noise_rate & 3)));
-    psg_volume(e, 3, s->noise_on ? 15 - s->noise_volume : 15);
-}
-
 /* ---- Lifecycle ---- */
 
 void genisys_engine_init(GenisysEngine *e, double sample_rate) {
@@ -165,15 +153,16 @@ void genisys_engine_init(GenisysEngine *e, double sample_rate) {
     psg_reset(&e->psg);
     e->psg_ticks_per_fm_sample = PSG_TICK_HZ / YM2612_SAMPLE_HZ;
     e->patch = genisys_default_patch();
-    e->psg_settings.noise_white = 1;
-    e->psg_settings.noise_rate = 1;
-    e->psg_settings.noise_volume = 10;
+    e->psg_settings = genisys_default_psg();
+    e->drum_settings.enabled = 0;
+    e->drum_settings.level = 80;
+    e->dac_last_written = 0x80;
     for (v = 0; v < GENISYS_NUM_VOICES; v++) {
         e->voice[v].state = GENISYS_VOICE_FREE;
         e->voice[v].velocity = 127;
     }
     genisys_engine_set_patch(e, &e->patch);
-    apply_psg_noise(e);
+    engine_psg_reset(e);
     e->dc_coeff = (float)exp(-2.0 * 3.14159265358979323846 * 5.0 / YM2612_SAMPLE_HZ);
     {
         GenisysConsoleSettings c = genisys_default_console();
@@ -214,16 +203,75 @@ void genisys_engine_set_patch(GenisysEngine *e, const GenisysPatch *patch) {
     for (v = 0; v < GENISYS_NUM_VOICES; v++) write_voice_patch(e, v);
 }
 
+GenisysPsgSettings genisys_default_psg(void) {
+    GenisysPsgSettings s;
+    s.mode = GENISYS_PSG_OFF;
+    s.level = 10;
+    s.octave = 0;
+    s.attack = 0;
+    s.decay = 2;
+    s.sustain = 12;
+    s.release = 2;
+    s.arp_speed = 2;
+    s.noise_on = 0;
+    s.noise_white = 1;
+    s.noise_rate = 1;
+    s.noise_volume = 10;
+    return s;
+}
+
 void genisys_engine_set_psg(GenisysEngine *e, const GenisysPsgSettings *settings) {
-    int v;
+    GenisysPsgSettings previous = e->psg_settings;
     e->psg_settings = *settings;
-    apply_psg_noise(e);
-    /* Re-level PSG doubles that are already sounding, so dragging the level
-     * mid-note takes effect immediately. */
-    for (v = 0; v < 3; v++) {
-        if (e->voice[v].state == GENISYS_VOICE_HELD) {
-            psg_volume(e, v, settings->level > 0 ? 15 - settings->level : 15);
-        }
+    if (e->psg_settings.level < 0) e->psg_settings.level = 0;
+    if (e->psg_settings.level > 15) e->psg_settings.level = 15;
+    engine_psg_apply_settings(e, &previous);
+}
+
+/* ---- Drums ---- */
+
+static void write_dac(GenisysEngine *e, int value) {
+    if (value != e->dac_last_written) {
+        ym2612_chip_write(&e->chip, 0, 0x2A, (uint8_t)value);
+        e->dac_last_written = value;
+    }
+}
+
+void genisys_engine_set_drums(GenisysEngine *e, const GenisysDrumSettings *settings) {
+    int was_enabled = e->drum_settings.enabled;
+    e->drum_settings = *settings;
+    if (e->drum_settings.level < 0) e->drum_settings.level = 0;
+    if (e->drum_settings.level > 100) e->drum_settings.level = 100;
+
+    if (settings->enabled && !was_enabled) {
+        /* Channel 6 now belongs to the DAC: release any FM note it had. */
+        GenisysVoice *v = &e->voice[GENISYS_NUM_VOICES - 1];
+        if (v->state == GENISYS_VOICE_HELD) genisys_engine_note_off(e, v->note);
+        v->state = GENISYS_VOICE_FREE;
+        write_dac(e, 0x80);
+        ym2612_chip_write(&e->chip, 0, 0x2B, 0x80);
+    } else if (!settings->enabled && was_enabled) {
+        e->dac_sample = NULL;
+        write_dac(e, 0x80);
+        ym2612_chip_write(&e->chip, 0, 0x2B, 0x00);
+    }
+}
+
+void genisys_engine_drum_hit(GenisysEngine *e, int note, int velocity) {
+    const GenisysDrum *drum = genisys_drum_for_note(note);
+    float gain;
+
+    if (!e->drum_settings.enabled || velocity <= 0) return;
+    gain = engine_velocity_gain(velocity);
+
+    if (drum->kind == GENISYS_DRUM_DAC) {
+        /* One DAC channel: a new hit cuts off the previous one, as in games. */
+        e->dac_sample = drum->sample;
+        e->dac_length = drum->length;
+        e->dac_pos = 0.0;
+        e->dac_gain = gain * (float)e->drum_settings.level / 100.0f;
+    } else if (drum->kind == GENISYS_DRUM_NOISE) {
+        engine_psg_noise_drum(e, drum, gain);
     }
 }
 
@@ -238,9 +286,14 @@ static int voice_is_silent(const GenisysEngine *e, int voice) {
     return 1;
 }
 
+/* Channel 6 belongs to the DAC while drums are on. */
+static int fm_voice_count(const GenisysEngine *e) {
+    return e->drum_settings.enabled ? GENISYS_NUM_VOICES - 1 : GENISYS_NUM_VOICES;
+}
+
 static int pick_oldest(const GenisysEngine *e, GenisysVoiceState state) {
     int v, best = -1;
-    for (v = 0; v < GENISYS_NUM_VOICES; v++) {
+    for (v = 0; v < fm_voice_count(e); v++) {
         if (e->voice[v].state == state && (best < 0 || e->voice[v].age < e->voice[best].age)) best = v;
     }
     return best;
@@ -254,10 +307,10 @@ static int pick_oldest(const GenisysEngine *e, GenisysVoiceState state) {
 static int allocate_voice(GenisysEngine *e, int note) {
     int v;
 
-    for (v = 0; v < GENISYS_NUM_VOICES; v++) {
+    for (v = 0; v < fm_voice_count(e); v++) {
         if (e->voice[v].state != GENISYS_VOICE_FREE && e->voice[v].note == note) return v;
     }
-    for (v = 0; v < GENISYS_NUM_VOICES; v++) {
+    for (v = 0; v < fm_voice_count(e); v++) {
         if (e->voice[v].state == GENISYS_VOICE_RELEASED && voice_is_silent(e, v)) {
             e->voice[v].state = GENISYS_VOICE_FREE;
         }
@@ -294,14 +347,7 @@ void genisys_engine_note_on(GenisysEngine *e, int note, int velocity) {
     write_voice_tl(e, v);
     key(e, v, 1);
 
-    if (v < 3) {
-        if (e->psg_settings.level > 0) {
-            psg_tone(e, v, 440.0 * pow(2.0, (note - 69) / 12.0));
-            psg_volume(e, v, 15 - e->psg_settings.level);
-        } else {
-            psg_volume(e, v, 15);
-        }
-    }
+    engine_psg_note_on(e, note);
 }
 
 void genisys_engine_note_off(GenisysEngine *e, int note) {
@@ -311,9 +357,9 @@ void genisys_engine_note_off(GenisysEngine *e, int note) {
             key(e, v, 0);
             e->voice[v].state = GENISYS_VOICE_RELEASED;
             e->voice[v].age = ++e->event_counter;
-            if (v < 3) psg_volume(e, v, 15);
         }
     }
+    engine_psg_note_off(e, note);
 }
 
 void genisys_engine_all_notes_off(GenisysEngine *e) {
@@ -321,6 +367,7 @@ void genisys_engine_all_notes_off(GenisysEngine *e) {
     for (v = 0; v < GENISYS_NUM_VOICES; v++) {
         if (e->voice[v].state == GENISYS_VOICE_HELD) genisys_engine_note_off(e, e->voice[v].note);
     }
+    engine_psg_all_notes_off(e);
 }
 
 /* ---- Rendering ---- */
@@ -332,6 +379,30 @@ void genisys_engine_all_notes_off(GenisysEngine *e) {
 static void clock_native(GenisysEngine *e, float *left, float *right) {
     int32_t fm_l, fm_r, psg_sum = 0;
     int n, k;
+
+    /* 60 Hz frame clock: PSG envelopes, arpeggio, noise drums. */
+    e->frame_accum += 1.0;
+    if (e->frame_accum >= ENGINE_SAMPLES_PER_FRAME) {
+        e->frame_accum -= ENGINE_SAMPLES_PER_FRAME;
+        engine_psg_frame(e);
+    }
+
+    /* DAC drum: feed the next 8-bit sample value, held between the sample's
+     * own (lower) rate steps, exactly as a sound driver would. */
+    if (e->dac_sample != NULL) {
+        int i = (int)e->dac_pos;
+        if (i >= e->dac_length) {
+            e->dac_sample = NULL;
+            write_dac(e, 0x80);
+        } else {
+            float v = (float)e->dac_sample[i] * e->dac_gain;
+            int q = (int)(v >= 0.0f ? v + 0.5f : v - 0.5f);
+            if (q > 127) q = 127;
+            if (q < -128) q = -128;
+            write_dac(e, q + 0x80);
+            e->dac_pos += GENISYS_DRUM_SAMPLE_HZ / YM2612_SAMPLE_HZ;
+        }
+    }
 
     ym2612_chip_clock_wide(&e->chip, &fm_l, &fm_r);
 

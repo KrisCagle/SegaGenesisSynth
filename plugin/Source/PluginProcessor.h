@@ -60,6 +60,7 @@ private:
     GenisysPatch lastPatch {};
     GenisysPsgSettings lastPsg {};
     GenisysConsoleSettings lastConsole {};
+    GenisysDrumSettings lastDrums {};
     bool forceParameterSync = true;
 
     juce::SmoothedValue<float> masterGain; // ramps volume changes to avoid clicks

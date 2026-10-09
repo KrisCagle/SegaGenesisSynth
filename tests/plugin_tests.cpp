@@ -200,6 +200,32 @@ namespace
                "selecting a program loads that preset's parameters");
     }
 
+    void testDrumsOnChannel10()
+    {
+        auto p = makeProcessor();
+        juce::AudioBuffer<float> buffer (2, kBlock);
+        juce::MidiBuffer midi;
+
+        midi.addEvent (juce::MidiMessage::noteOn (10, 36, (juce::uint8) 127), 0);
+        process (*p, buffer, midi);
+        process (*p, buffer, midi);
+        const float drumsOffLevel = rms (buffer, 0, kBlock);
+
+        auto q = makeProcessor();
+        setIntParam (*q, "drums_on", 1);
+        midi.addEvent (juce::MidiMessage::noteOn (10, 36, (juce::uint8) 127), 0);
+        process (*q, buffer, midi);
+        float peakLevel = 0.0f;
+        for (int i = 0; i < 4; ++i)
+        {
+            process (*q, buffer, midi);
+            peakLevel = juce::jmax (peakLevel, peak (buffer, 0, kBlock));
+        }
+
+        check (drumsOffLevel > 0.0f, "with drums off, channel 10 plays FM notes");
+        check (peakLevel > 0.05f, "with drums on, a channel 10 kick plays the drum kit");
+    }
+
     void testMonoOutput()
     {
         auto p = std::make_unique<GenisysProcessor>();
@@ -230,6 +256,7 @@ int main()
     testStateRoundTrip();
     testStateRestoresInBetweenValues();
     testProgramChange();
+    testDrumsOnChannel10();
     testMonoOutput();
 
     if (failures == 0)
