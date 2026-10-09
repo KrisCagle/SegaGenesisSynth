@@ -49,4 +49,4 @@ The YM2612 envelope-rate, detune and key-code tables are reverse-engineered hard
 
 ## License
 
-To be decided before the first release.
+Genisys is free software under the [GNU General Public License v3.0](LICENSE). You can use, share and modify it. If you distribute a modified version, you must also share its source code under the same license.
