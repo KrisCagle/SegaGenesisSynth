@@ -67,8 +67,9 @@ if(GENISYS_BUILD_TESTS)
     add_test(NAME plugin_tests COMMAND plugin_tests)
 endif()
 
-if(GENISYS_BUILD_TOOLS)
-    # Renders every editor tab to PNG for reviewing UI changes.
+if(GENISYS_BUILD_UI_SNAPSHOT)
+    # Renders every editor tab to PNG for reviewing UI changes. Off by
+    # default: it's a whole extra JUCE program to compile and link.
     juce_add_console_app(genisys_ui_snapshot PRODUCT_NAME "Genisys UI Snapshot")
     target_sources(genisys_ui_snapshot PRIVATE ${PROJECT_SOURCE_DIR}/tools/ui_snapshot.cpp)
     target_link_libraries(genisys_ui_snapshot PRIVATE GenisysSharedCode)
