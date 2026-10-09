@@ -48,6 +48,8 @@ namespace genisys::params
         std::atomic<float>* ams; std::atomic<float>* pms;
         std::atomic<float>* velocitySens; std::atomic<float>* masterGain; std::atomic<float>* octaveShift;
         std::atomic<float>* bendRangeSemis; std::atomic<float>* vibratoDepth; std::atomic<float>* vibratoRate;
+        std::atomic<float>* voiceMode; std::atomic<float>* glideTime; std::atomic<float>* unison;
+        std::atomic<float>* unisonDetune; std::atomic<float>* unisonStereo;
         std::atomic<float>* psgLevel; std::atomic<float>* noiseOn; std::atomic<float>* noiseWhite;
         std::atomic<float>* noiseRate; std::atomic<float>* noiseVolume;
         std::atomic<float>* chipModel; std::atomic<float>* consoleFilter; std::atomic<float>* filterCutoff;

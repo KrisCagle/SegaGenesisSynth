@@ -93,6 +93,11 @@ GenisysPatch genisys_default_patch(void) {
     p.velocity_sens = 50;
     p.vibrato_depth = 50;
     p.vibrato_rate = 55;
+    p.voice_mode = GENISYS_MODE_POLY;
+    p.glide_time = 0;
+    p.unison = 1;
+    p.unison_detune = 12;
+    p.unison_stereo = 1;
     for (i = 0; i < 4; i++) {
         GenisysOperatorParams *o = &p.op[i];
         o->mul = 1;
@@ -158,12 +163,22 @@ static void write_voice_patch(GenisysEngine *e, int voice) {
     }
     write_voice_tl(e, voice);
     /* Both speakers on (0xC0), plus the LFO sensitivities. */
-    chip_write_channel(e, voice, 0xB4, (uint8_t)(0xC0 | ((p->ams & 3) << 4) | (p->pms & 7)));
+    chip_write_channel(e, voice, 0xB4, (uint8_t)(e->voice[voice].pan | ((p->ams & 3) << 4) | (p->pms & 7)));
+}
+
+static int is_mono(const GenisysEngine *e) {
+    return e->patch.voice_mode == GENISYS_MODE_MONO || e->patch.voice_mode == GENISYS_MODE_LEGATO;
+}
+
+static int unison_count(const GenisysEngine *e) {
+    int n = e->patch.unison;
+    return n < 1 ? 1 : (n > 3 ? 3 : n);
 }
 
 static void write_voice_pitch(GenisysEngine *e, int v) {
     int block, fnum;
-    genisys_pitch_to_block_fnum(e->voice[v].note + engine_pitch_offset(e), &block, &fnum);
+    double base = is_mono(e) ? e->mono_pitch : (double)e->voice[v].note;
+    genisys_pitch_to_block_fnum(base + e->voice[v].detune + engine_pitch_offset(e), &block, &fnum);
     if (block == e->voice[v].last_block && fnum == e->voice[v].last_fnum) return;
     /* $A4 (block + fnum high bits) must be written before $A0 (fnum low),
      * which latches both. */
@@ -204,6 +219,7 @@ void genisys_engine_init(GenisysEngine *e, double sample_rate) {
         e->voice[v].velocity = 127;
         e->voice[v].last_block = -1;
         e->voice[v].last_fnum = -1;
+        e->voice[v].pan = 0xC0;
     }
     genisys_engine_set_patch(e, &e->patch);
     engine_psg_reset(e);
@@ -240,8 +256,28 @@ void genisys_engine_set_sample_rate(GenisysEngine *e, double sample_rate) {
     genisys_resampler_init(&e->resampler, YM2612_SAMPLE_HZ, sample_rate);
 }
 
+static void release_all_voices(GenisysEngine *e) {
+    int v;
+    for (v = 0; v < GENISYS_NUM_VOICES; v++) {
+        if (e->voice[v].state == GENISYS_VOICE_HELD) {
+            key(e, v, 0);
+            e->voice[v].state = GENISYS_VOICE_RELEASED;
+            e->voice[v].sustained = 0;
+            e->voice[v].age = ++e->event_counter;
+        }
+        e->voice[v].detune = 0.0;
+        e->voice[v].pan = 0xC0;
+    }
+    e->stack_count = 0;
+    engine_psg_all_notes_off(e);
+}
+
 void genisys_engine_set_patch(GenisysEngine *e, const GenisysPatch *patch) {
     int v;
+    if (patch->voice_mode != e->patch.voice_mode || patch->unison != e->patch.unison) {
+        /* A different way of using the channels: start clean. */
+        release_all_voices(e);
+    }
     e->patch = *patch;
     ym2612_chip_write(&e->chip, 0, 0x22, (uint8_t)((patch->lfo_enable ? 0x08 : 0) | (patch->lfo_rate & 7)));
     for (v = 0; v < GENISYS_NUM_VOICES; v++) write_voice_patch(e, v);
@@ -335,9 +371,10 @@ static int fm_voice_count(const GenisysEngine *e) {
     return e->drum_settings.enabled ? GENISYS_NUM_VOICES - 1 : GENISYS_NUM_VOICES;
 }
 
-static int pick_oldest(const GenisysEngine *e, GenisysVoiceState state) {
+static int pick_oldest(const GenisysEngine *e, GenisysVoiceState state, unsigned claimed) {
     int v, best = -1;
     for (v = 0; v < fm_voice_count(e); v++) {
+        if (claimed & (1u << v)) continue;
         if (e->voice[v].state == state && (best < 0 || e->voice[v].age < e->voice[best].age)) best = v;
     }
     return best;
@@ -348,21 +385,131 @@ static int pick_oldest(const GenisysEngine *e, GenisysVoiceState state) {
  * oldest held note. Taking the *oldest* free voice rather than the lowest
  * numbered one means a release tail is never cut off while another voice
  * is available. */
-static int allocate_voice(GenisysEngine *e, int note) {
+/* `claimed` excludes voices already taken by this note-on (unison). */
+static int allocate_voice(GenisysEngine *e, int note, unsigned claimed) {
     int v;
 
     for (v = 0; v < fm_voice_count(e); v++) {
-        if (e->voice[v].state != GENISYS_VOICE_FREE && e->voice[v].note == note) return v;
+        if (!(claimed & (1u << v)) && e->voice[v].state != GENISYS_VOICE_FREE && e->voice[v].note == note) return v;
     }
     for (v = 0; v < fm_voice_count(e); v++) {
         if (e->voice[v].state == GENISYS_VOICE_RELEASED && voice_is_silent(e, v)) {
             e->voice[v].state = GENISYS_VOICE_FREE;
         }
     }
-    v = pick_oldest(e, GENISYS_VOICE_FREE);
-    if (v < 0) v = pick_oldest(e, GENISYS_VOICE_RELEASED);
-    if (v < 0) v = pick_oldest(e, GENISYS_VOICE_HELD);
+    v = pick_oldest(e, GENISYS_VOICE_FREE, claimed);
+    if (v < 0) v = pick_oldest(e, GENISYS_VOICE_RELEASED, claimed);
+    if (v < 0) v = pick_oldest(e, GENISYS_VOICE_HELD, claimed);
     return v;
+}
+
+/* Unison layout for copy i of n: detune spread evenly around the note,
+ * panned left / centre / right with the chip's hard pan switches. */
+static double unison_detune(const GenisysEngine *e, int i, int n) {
+    double cents = e->patch.unison_detune;
+    if (n == 2) return (i == 0 ? -cents : cents) / 200.0;
+    if (n == 3) return (i - 1) * cents / 100.0;
+    return 0.0;
+}
+
+static uint8_t unison_pan(const GenisysEngine *e, int i, int n) {
+    if (n < 2 || !e->patch.unison_stereo) return 0xC0;
+    if (n == 2) return i == 0 ? 0x80 : 0x40;
+    return i == 0 ? 0x80 : (i == 2 ? 0x40 : 0xC0);
+}
+
+static void start_voice(GenisysEngine *e, int v, int note, int velocity, double detune, uint8_t pan, int retrigger) {
+    if (retrigger) key(e, v, 0); /* the chip only restarts the envelope on an off->on edge */
+
+    e->voice[v].state = GENISYS_VOICE_HELD;
+    e->voice[v].note = note;
+    e->voice[v].velocity = velocity;
+    e->voice[v].age = ++e->event_counter;
+    e->voice[v].sustained = 0;
+    e->voice[v].detune = detune;
+    if (e->voice[v].pan != pan) {
+        const GenisysPatch *p = &e->patch;
+        e->voice[v].pan = pan;
+        chip_write_channel(e, v, 0xB4, (uint8_t)(pan | ((p->ams & 3) << 4) | (p->pms & 7)));
+    }
+
+    e->voice[v].last_block = e->voice[v].last_fnum = -1; /* force the write */
+    write_voice_pitch(e, v);
+    write_voice_tl(e, v);
+    if (retrigger) key(e, v, 1);
+}
+
+/* ---- Mono / Legato ---- */
+
+static void stack_remove(GenisysEngine *e, int note) {
+    int i, j = 0;
+    for (i = 0; i < e->stack_count; i++) {
+        if (e->note_stack[i] != note) e->note_stack[j++] = e->note_stack[i];
+    }
+    e->stack_count = j;
+}
+
+static void stack_push(GenisysEngine *e, int note) {
+    stack_remove(e, note);
+    if (e->stack_count == 16) stack_remove(e, e->note_stack[0]);
+    e->note_stack[e->stack_count++] = note;
+}
+
+/* Moves the single mono note to `note`, gliding if Glide is set. */
+static void mono_play(GenisysEngine *e, int note, int velocity, int retrigger) {
+    int i, n = unison_count(e);
+    double ticks = e->patch.glide_time / 1000.0 * (YM2612_SAMPLE_HZ / ENGINE_CONTROL_PERIOD);
+
+    e->mono_target = note;
+    if (e->patch.glide_time > 0 && e->mono_has_pitch && ticks >= 1.0) {
+        /* Constant-time glide: any interval takes Glide ms. */
+        e->glide_step = (e->mono_target - e->mono_pitch) / ticks;
+    } else {
+        e->mono_pitch = note;
+        e->glide_step = 0.0;
+    }
+    e->mono_has_pitch = 1;
+    e->mono_velocity = velocity;
+
+    for (i = 0; i < n && i < fm_voice_count(e); i++) {
+        start_voice(e, i, note, velocity, unison_detune(e, i, n), unison_pan(e, i, n), retrigger);
+    }
+}
+
+static void mono_note_on(GenisysEngine *e, int note, int velocity) {
+    int was_playing = e->stack_count > 0, previous = was_playing ? e->note_stack[e->stack_count - 1] : -1;
+    stack_push(e, note);
+    mono_play(e, note, velocity, !was_playing || e->patch.voice_mode == GENISYS_MODE_MONO);
+    if (was_playing) engine_psg_note_off(e, previous);
+    engine_psg_note_on(e, note);
+}
+
+static void mono_note_off(GenisysEngine *e, int note) {
+    int was_top = e->stack_count > 0 && e->note_stack[e->stack_count - 1] == note, v;
+
+    stack_remove(e, note);
+    if (e->stack_count > 0) {
+        if (was_top) {
+            /* Fall back to the key still held (last-note priority). */
+            int back = e->note_stack[e->stack_count - 1];
+            mono_play(e, back, e->mono_velocity, e->patch.voice_mode == GENISYS_MODE_MONO);
+            engine_psg_note_off(e, note);
+            engine_psg_note_on(e, back);
+        }
+        return;
+    }
+    for (v = 0; v < unison_count(e) && v < fm_voice_count(e); v++) {
+        if (e->voice[v].state != GENISYS_VOICE_HELD) continue;
+        if (e->sustain_pedal) {
+            e->voice[v].sustained = 1;
+        } else {
+            key(e, v, 0);
+            e->voice[v].state = GENISYS_VOICE_RELEASED;
+            e->voice[v].sustained = 0;
+            e->voice[v].age = ++e->event_counter;
+        }
+    }
+    if (!e->sustain_pedal) engine_psg_note_off(e, e->voice[0].note);
 }
 
 void genisys_engine_note_on(GenisysEngine *e, int note, int velocity) {
@@ -375,25 +522,31 @@ void genisys_engine_note_on(GenisysEngine *e, int note, int velocity) {
     }
     if (velocity > 127) velocity = 127;
 
-    v = allocate_voice(e, note);
-    key(e, v, 0); /* the chip only restarts the envelope on an off->on edge */
+    if (is_mono(e)) {
+        mono_note_on(e, note, velocity);
+        return;
+    }
 
-    e->voice[v].state = GENISYS_VOICE_HELD;
-    e->voice[v].note = note;
-    e->voice[v].velocity = velocity;
-    e->voice[v].age = ++e->event_counter;
-    e->voice[v].sustained = 0;
-
-    e->voice[v].last_block = e->voice[v].last_fnum = -1; /* force the write */
-    write_voice_pitch(e, v);
-    write_voice_tl(e, v);
-    key(e, v, 1);
-
+    {
+        int i, n = unison_count(e);
+        unsigned claimed = 0;
+        for (i = 0; i < n; i++) {
+            v = allocate_voice(e, note, claimed);
+            if (v < 0) break;
+            claimed |= 1u << v;
+            start_voice(e, v, note, velocity, unison_detune(e, i, n), unison_pan(e, i, n), 1);
+        }
+    }
     engine_psg_note_on(e, note);
 }
 
 void genisys_engine_note_off(GenisysEngine *e, int note) {
     int v;
+
+    if (is_mono(e)) {
+        mono_note_off(e, note);
+        return;
+    }
 
     if (e->sustain_pedal) {
         /* Keep sounding until the pedal comes up. */
@@ -438,6 +591,7 @@ void genisys_engine_sustain(GenisysEngine *e, int down) {
 void genisys_engine_all_notes_off(GenisysEngine *e) {
     int v;
     e->sustain_pedal = 0;
+    e->stack_count = 0; /* mono: nothing to fall back to */
     for (v = 0; v < GENISYS_NUM_VOICES; v++) {
         if (e->voice[v].state == GENISYS_VOICE_HELD) genisys_engine_note_off(e, e->voice[v].note);
     }
@@ -460,6 +614,13 @@ static void clock_native(GenisysEngine *e, float *left, float *right) {
         e->control_counter = 0;
         e->vibrato_phase += (e->patch.vibrato_rate / 10.0) * ENGINE_CONTROL_PERIOD / YM2612_SAMPLE_HZ;
         e->vibrato_phase -= floor(e->vibrato_phase);
+        if (e->glide_step != 0.0) {
+            e->mono_pitch += e->glide_step;
+            if ((e->glide_step > 0.0) == (e->mono_pitch >= e->mono_target)) {
+                e->mono_pitch = e->mono_target;
+                e->glide_step = 0.0;
+            }
+        }
         for (v = 0; v < GENISYS_NUM_VOICES; v++) {
             if (e->voice[v].state != GENISYS_VOICE_FREE) write_voice_pitch(e, v);
         }
