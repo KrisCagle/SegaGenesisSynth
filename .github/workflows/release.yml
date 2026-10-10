@@ -57,13 +57,20 @@ jobs:
           cp -R "$ART/VST3/Genisys.vst3" dist/Genisys/
           case "${{ runner.os }}" in
             Windows) cp "$ART/Standalone/Genisys.exe" dist/Genisys/ ;;
-            macOS)   cp -R "$ART/AU/Genisys.component" "$ART/Standalone/Genisys.app" dist/Genisys/ ;;
+            macOS)   cp -R "$ART/AU/Genisys.component" "$ART/Standalone/Genisys.app" dist/Genisys/
+                     # One-click installer / uninstaller (see packaging/macos).
+                     cp packaging/macos/*.command dist/Genisys/
+                     chmod +x dist/Genisys/*.command ;;
             Linux)   cp "$ART/Standalone/Genisys" dist/Genisys/ ;;
           esac
           cat > dist/Genisys/INSTALL.txt <<EOF
           Genisys ${GITHUB_REF_NAME} for ${{ matrix.name }}
 
-          Plugin: copy the whole Genisys.vst3 folder into your VST3 folder
+          macOS, easy way: double-click "Install Genisys". The first time, macOS
+            blocks it: open System Settings > Privacy & Security, click "Open Anyway",
+            then double-click it again. It installs everything and clears the block.
+
+          Plugin, by hand: copy the whole Genisys.vst3 folder into your VST3 folder
             Windows: C:\Program Files\Common Files\VST3
             macOS:   ~/Library/Audio/Plug-Ins/VST3/   (Genisys.component -> ~/Library/Audio/Plug-Ins/Components/)
             Linux:   ~/.vst3/
