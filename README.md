@@ -15,7 +15,7 @@ Go to the **[Releases page](../../releases/latest)** and download the zip for yo
 | Your computer | Download | Inside the zip |
 |---|---|---|
 | Windows 10/11 (64-bit) | `Genisys-Windows.zip` | `Genisys.vst3`, `Genisys.exe` |
-| macOS 10.13+ (Intel or Apple Silicon) | `Genisys-macOS.zip` | `Genisys.vst3`, `Genisys.component`, `Genisys.app` |
+| macOS 10.13+ (Intel or Apple Silicon) | `Genisys-macOS.zip` | `Install Genisys`, `Genisys.vst3`, `Genisys.component`, `Genisys.app` |
 | Linux (64-bit) | `Genisys-Linux.zip` | `Genisys.vst3`, `Genisys` |
 
 Unzip it first. The plugin files are folders (`Genisys.vst3`, `Genisys.component`), so always copy the **whole folder**.
@@ -28,6 +28,15 @@ Unzip it first. The plugin files are folders (`Genisys.vst3`, `Genisys.component
 3. Add **Genisys** to an instrument track. You'll find it under instruments, by "Kris Cagle".
 
 ### macOS
+
+**The easy way:**
+1. Unzip `Genisys-macOS.zip` and double-click **Install Genisys** in the `Genisys` folder.
+2. The first time, macOS says it can't verify the developer, because the build isn't signed by a paid Apple developer account. Click **Done**, then go to **System Settings → Privacy & Security**, scroll down and click **Open Anyway**. Double-click **Install Genisys** again.
+3. A Terminal window lists what it installed. Open your DAW and rescan plugins (see below).
+
+The installer puts the VST3, the Audio Unit and the Standalone app in the right places and clears macOS's download block. **Uninstall Genisys** removes them again.
+
+**By hand**, if you prefer:
 1. Copy `Genisys.vst3` into `~/Library/Audio/Plug-Ins/VST3/`.
    - In Finder, press **Cmd+Shift+G** and paste the path.
    - For **Logic** or **GarageBand**, also copy `Genisys.component` into `~/Library/Audio/Plug-Ins/Components/`.
