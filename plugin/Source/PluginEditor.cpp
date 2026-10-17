@@ -68,10 +68,19 @@ GenisysEditor::GenisysEditor (GenisysProcessor& p)
     : AudioProcessorEditor (p),
       genisys (p),
       cartridge (p),
+      learnOverlay (p.midiMap),
       scope (p),
       wheels (p),
       keyboard (p.keyboardState, juce::MidiKeyboardComponent::horizontalKeyboard)
 {
+    // Pop-up menus in the panel's colours.
+    lookAndFeel.setColour (juce::PopupMenu::backgroundColourId, theme::menuBottom);
+    lookAndFeel.setColour (juce::PopupMenu::textColourId, theme::text);
+    lookAndFeel.setColour (juce::PopupMenu::headerTextColourId, theme::yellow);
+    lookAndFeel.setColour (juce::PopupMenu::highlightedBackgroundColourId, theme::yellow);
+    lookAndFeel.setColour (juce::PopupMenu::highlightedTextColourId, juce::Colour (0xff111111));
+    setLookAndFeel (&lookAndFeel);
+
     addAndMakeVisible (canvas);
     canvas.setSize (theme::width, theme::height);
 
@@ -100,7 +109,8 @@ GenisysEditor::GenisysEditor (GenisysProcessor& p)
                        "The square-wave chip: layers, arpeggios and noise.",
                        "The 8-bit drum kit on MIDI channel 10.",
                        "Chorus, echo and reverb.",
-                       "Vibrato, tremolo, pitch bend and display options." };
+                       "Vibrato, tremolo, pitch bend and display options.",
+                       "Link the knobs and faders on your MIDI keyboard to Genisys." };
     setHelp (tabs, "MENU", "Click a tab to switch pages.");
     tabs.onChange = [this] (int i) { showPage (i); };
     for (auto& page : pages)
@@ -114,7 +124,28 @@ GenisysEditor::GenisysEditor (GenisysProcessor& p)
     buildDrumsPage (pages[3]);
     buildFxPage (pages[4]);
     buildModPage (pages[5]);
+    buildMidiPage (pages[6]);
+
+    canvas.addChildComponent (learnOverlay);
+    learnOverlay.setBounds (pages[0].getBounds());
+    learnOverlay.onPick = [this] (const juce::String& id)
+    {
+        genisys.midiMap.startLearning (id);
+        help.show ("MIDI LEARN|Now move a knob or fader on your MIDI keyboard to link it to " + genisys.midiMap.parameterName (id) + ".");
+    };
+    learnOverlay.onForget = [this] (const juce::String& id)
+    {
+        genisys.midiMap.forgetParam (id);
+        help.show ("MIDI LEARN|Unlinked " + genisys.midiMap.parameterName (id) + ".");
+    };
+    canvas.addAndMakeVisible (learnButton);
+    learnButton.setBounds (884, 82, 100, 26);
+    learnButton.onClick = [this] { setLearnMode (! learnMode); };
+    setHelp (learnButton, "MIDI LEARN",
+             "Link your MIDI keyboard's knobs to Genisys: press LEARN, click a control, then turn a knob. Right-click any control "
+             "for the same thing. Esc or LEARN again to finish.");
     showPage (0);
+    shownMapVersion = genisys.midiMap.getVersion(); // opening the editor changes nothing
 
     // Bottom: help, scope, wheels, octave, keyboard.
     canvas.addAndMakeVisible (help);
@@ -164,7 +195,9 @@ GenisysEditor::GenisysEditor (GenisysProcessor& p)
 
 GenisysEditor::~GenisysEditor()
 {
+    genisys.midiMap.stopLearning();
     canvas.removeMouseListener (this);
+    setLookAndFeel (nullptr);
 }
 
 juce::RangedAudioParameter& GenisysEditor::param (const char* id)
@@ -188,8 +221,98 @@ void GenisysEditor::selectTab (int index)
 
 void GenisysEditor::showPage (int index)
 {
+    currentPage = index;
     for (size_t i = 0; i < pages.size(); ++i)
         pages[i].setVisible ((int) i == index);
+    learnOverlay.setPage (&pages[(size_t) index]);
+    // The MIDI page stays usable while learning (to check the links).
+    learnOverlay.setVisible (learnMode && index != numTabs - 1);
+}
+
+// ---------------------------------------------------------------------------
+void GenisysEditor::setLearnMode (bool on)
+{
+    learnMode = on;
+    if (! on)
+        genisys.midiMap.stopLearning();
+    if (on && currentPage == numTabs - 1)
+        selectTab (0); // nothing to learn on the MIDI page itself
+    learnOverlay.setVisible (on && currentPage != numTabs - 1);
+    learnOverlay.toFront (false);
+    learnButton.setLit (on);
+    learnButton.setText (on ? "LEARNING" : "LEARN");
+    help.show (on ? "MIDI LEARN|Click any outlined control, then move a knob or fader on your MIDI keyboard. Right-click an "
+                    "outline to unlink it. Switch tabs to reach every page. Press LEARN or Esc when you're done."
+                  : "MIDI LEARN|Done. Your links are saved with your project.");
+}
+
+void GenisysEditor::showParameterMenu (juce::Component& source, juce::RangedAudioParameter& p)
+{
+    const auto id = p.getParameterID();
+    const int cc = genisys.midiMap.ccFor (id);
+
+    juce::PopupMenu menu;
+    menu.addSectionHeader (p.getName (40));
+    menu.addItem (1, cc >= 0 ? "MIDI Learn (now CC " + juce::String (cc) + ")" : juce::String ("MIDI Learn"));
+    menu.addItem (2, "Forget MIDI link", cc >= 0);
+    menu.addSeparator();
+    menu.addItem (3, "Reset to default");
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&source),
+                        [this, id] (int result)
+                        {
+                            auto& m = genisys.midiMap;
+                            auto* param = m.getParameter (id);
+                            if (result == 1)
+                            {
+                                m.startLearning (id);
+                                help.show ("MIDI LEARN|Move a knob or fader on your MIDI keyboard to link it to " + m.parameterName (id)
+                                           + ". Esc cancels.");
+                            }
+                            else if (result == 2)
+                            {
+                                m.forgetParam (id);
+                                help.show ("MIDI LEARN|Unlinked " + m.parameterName (id) + ".");
+                            }
+                            else if (result == 3 && param != nullptr)
+                            {
+                                param->beginChangeGesture();
+                                param->setValueNotifyingHost (param->getDefaultValue());
+                                param->endChangeGesture();
+                            }
+                        });
+}
+
+void GenisysEditor::refreshMidiMap()
+{
+    auto& map = genisys.midiMap;
+    const auto learning = map.learningParamId();
+
+    // A knob was just learned (the audio thread finished it).
+    if (lastLearning.isNotEmpty() && learning.isEmpty())
+    {
+        const int cc = map.ccFor (lastLearning);
+        if (cc >= 0)
+            help.show ("LINKED!|CC " + juce::String (cc) + " now controls " + map.parameterName (lastLearning)
+                       + (learnMode ? ". Click another control, or press LEARN to finish." : "."));
+    }
+    lastLearning = learning;
+
+    const auto version = map.getVersion();
+    if (version != shownMapVersion)
+    {
+        shownMapVersion = version;
+        if (mappingList != nullptr)
+            mappingList->refresh();
+        if (pickupToggle != nullptr && pickupToggle->isOn() != map.pickupEnabled())
+            pickupToggle->setOn (map.pickupEnabled());
+        learnOverlay.repaint();
+        // The map is saved with the project, so the project has changed.
+        genisys.updateHostDisplay (juce::AudioProcessor::ChangeDetails().withNonParameterStateChanged (true));
+    }
+
+    if (learnMode && ++blinkTicks % 4 == 0)
+        learnOverlay.blink();
 }
 
 // ---------------------------------------------------------------------------
@@ -297,6 +420,109 @@ void GenisysEditor::buildDrumsPage (Page& page)
                          1.1f, theme::text, true);
 }
 
+void GenisysEditor::buildMidiPage (Page& page)
+{
+    using Layout = genisys::MidiMap::Layout;
+    page.add<MenuWindow> ({ 0, 0, 300, 372 }, "CONTROLLER");
+    page.add<PixelText> ({ 14, 30, 270, 12 }, "FACTORY LAYOUTS", 1.15f, theme::text);
+    struct Choice { Layout layout; const char* label; const char* help; };
+    const Choice choices[] = {
+        { Layout::generic, "GENERIC (STANDARD CCS)",
+          "Uses the MIDI standard's sound-control numbers (brightness on CC 74, attack 73, release 72...). Works with many keyboards and DAW templates." },
+        { Layout::arturiaMiniLab, "ARTURIA MINILAB",
+          "MiniLab 3 factory settings. Knobs 1-8: bright, attack, decay, release, feedback, vibrato, echo, reverb. Faders: volume, PSG, drums, glide." },
+        { Layout::akaiMpkMini, "AKAI MPK MINI",
+          "MPK Mini factory program (knobs send CC 70-77). Knobs 1-8: bright, attack, decay, release, feedback, vibrato, echo, reverb." },
+        { Layout::novationLaunchkey, "NOVATION LAUNCHKEY",
+          "Launchkey pots in Custom mode (CC 21-28). Knobs 1-8: bright, attack, decay, release, feedback, vibrato, echo, reverb." },
+    };
+    int y = 48;
+    for (const auto& c : choices)
+    {
+        auto& b = page.add<PixelButton> ({ 14, y, 272, 24 }, c.label);
+        setHelp (b, c.label, juce::String (c.help) + " Replaces the current links.");
+        const auto layout = c.layout;
+        b.onClick = [this, layout]
+        {
+            genisys.midiMap.loadLayout (layout);
+            help.show ("CONTROLLER|Loaded the " + genisys::MidiMap::layoutName (layout).toUpperCase()
+                       + " layout. Press SET AS DEFAULT to use it in every new Genisys.");
+        };
+        y += 30;
+    }
+
+    auto& pickup = page.add<LedToggle> ({ 16, 178, 260, 16 }, "PICKUP (NO JUMPS)");
+    pickupToggle = &pickup;
+    pickup.setOn (genisys.midiMap.pickupEnabled());
+    setHelp (pickup, "PICKUP",
+             "On: a hardware knob only takes over once you turn it past the control's current setting, so sounds never jump. "
+             "Off: the control follows the knob straight away.");
+    pickup.onChange = [this] (bool on) { genisys.midiMap.setPickup (on); };
+
+    auto& setDefault = page.add<PixelButton> ({ 14, 210, 272, 24 }, "SET AS DEFAULT");
+    setHelp (setDefault, "SET AS DEFAULT", "Every new Genisys you open starts with these links. Projects keep their own.");
+    setDefault.onClick = [this]
+    {
+        help.show (genisys.midiMap.saveAsDefault() ? "SET AS DEFAULT|Saved. New Genisys windows start with these links."
+                                                   : "SET AS DEFAULT|Couldn't save the default map.");
+    };
+    auto& load = page.add<PixelButton> ({ 14, 240, 132, 24 }, "LOAD MAP");
+    setHelp (load, "LOAD MAP", "Open a controller map file (.genisysmap), e.g. one a friend made for the same keyboard.");
+    load.onClick = [this] { loadControllerMap(); };
+    auto& save = page.add<PixelButton> ({ 154, 240, 132, 24 }, "SAVE MAP");
+    setHelp (save, "SAVE MAP", "Save these links as a file to share or keep.");
+    save.onClick = [this] { saveControllerMap(); };
+    auto& clear = page.add<PixelButton> ({ 14, 270, 272, 24 }, "CLEAR ALL");
+    setHelp (clear, "CLEAR ALL", "Remove every link.");
+    clear.onClick = [this] { genisys.midiMap.clear(); help.show ("CLEAR ALL|Every link removed."); };
+    page.add<PixelText> ({ 14, 304, 272, 56 }, "Right-click any knob for MIDI Learn. Your links are saved with the project.",
+                         1.1f, theme::textDim, true);
+
+    page.add<MenuWindow> ({ 310, 0, 658, 372 }, "KNOB LINKS");
+    mappingList = &page.add<MappingList> ({ 322, 32, 634, 326 }, genisys.midiMap);
+    setHelp (*mappingList, "KNOB LINKS",
+             "Drag MIN or MAX up and down to limit how far a knob moves its control (MIN above MAX turns it around). "
+             "Double-click to reset. X removes a link.");
+}
+
+void GenisysEditor::loadControllerMap()
+{
+    chooser = std::make_unique<juce::FileChooser> ("Load a controller map", juce::File(), "*.genisysmap");
+    chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                          [this] (const juce::FileChooser& fc)
+                          {
+                              const auto file = fc.getResult();
+                              if (file == juce::File())
+                                  return;
+                              auto xml = juce::XmlDocument::parse (file);
+                              const auto tree = xml != nullptr ? juce::ValueTree::fromXml (*xml) : juce::ValueTree();
+                              if (! tree.hasType (genisys::MidiMap::treeType))
+                              {
+                                  help.show ("COULDN'T LOAD|" + file.getFileName() + " isn't a Genisys controller map.");
+                                  return;
+                              }
+                              genisys.midiMap.fromValueTree (tree);
+                              help.show ("LOADED|" + file.getFileName());
+                          });
+}
+
+void GenisysEditor::saveControllerMap()
+{
+    chooser = std::make_unique<juce::FileChooser> ("Save the controller map", juce::File(), "*.genisysmap");
+    chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
+                              | juce::FileBrowserComponent::warnAboutOverwriting,
+                          [this] (const juce::FileChooser& fc)
+                          {
+                              auto file = fc.getResult();
+                              if (file == juce::File())
+                                  return;
+                              file = file.withFileExtension (".genisysmap");
+                              auto xml = genisys.midiMap.toValueTree().createXml();
+                              const bool ok = xml != nullptr && xml->writeTo (file);
+                              help.show (ok ? "SAVED|" + file.getFileName() : "COULDN'T SAVE|" + file.getFileName());
+                          });
+}
+
 void GenisysEditor::buildFxPage (Page& page)
 {
     page.add<MenuWindow> ({ 0, 0, 316, 372 }, "CHORUS");
@@ -354,6 +580,7 @@ void GenisysEditor::buildModPage (Page& page)
 void GenisysEditor::timerCallback()
 {
     cartridge.refresh();
+    refreshMidiMap();
 
     // Operator cards: carrier/modulator labels follow the algorithm.
     const int algorithm = (int) std::lround (genisys.state.getRawParameterValue ("algorithm")->load());
@@ -376,7 +603,16 @@ void GenisysEditor::mouseEnter (const juce::MouseEvent& e) { mouseMove (e); }
 
 void GenisysEditor::mouseMove (const juce::MouseEvent& e)
 {
-    const auto text = getHelp (*e.eventComponent);
+    if (learnMode || genisys.midiMap.learningParamId().isNotEmpty())
+        return; // keep the learn instructions on screen
+    auto text = getHelp (*e.eventComponent);
+    const auto id = getMappableParamId (*e.eventComponent);
+    if (text.isNotEmpty() && id.isNotEmpty())
+    {
+        const int cc = genisys.midiMap.ccFor (id);
+        if (cc >= 0)
+            text << " [MIDI: CC " << cc << "]";
+    }
     if (text.isNotEmpty())
         help.show (text);
 }
@@ -407,6 +643,17 @@ void GenisysEditor::shiftOctave (int delta)
 
 bool GenisysEditor::keyPressed (const juce::KeyPress& key)
 {
+    if (key == juce::KeyPress::escapeKey && (learnMode || genisys.midiMap.learningParamId().isNotEmpty()))
+    {
+        if (learnMode)
+            setLearnMode (false);
+        else
+        {
+            genisys.midiMap.stopLearning();
+            help.show ("MIDI LEARN|Cancelled.");
+        }
+        return true;
+    }
     const auto c = juce::CharacterFunctions::toLowerCase (key.getTextCharacter());
     if (c == 'z') { shiftOctave (-1); return true; }
     if (c == 'x') { shiftOctave (1); return true; }

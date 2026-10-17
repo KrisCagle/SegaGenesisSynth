@@ -24,8 +24,10 @@ GenisysProcessor::GenisysProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       state (*this, nullptr, "GenisysState", genisys::params::createLayout()),
       engine ((ensureEngineGlobalsInitialised(), std::make_unique<GenisysEngine>())),
-      params (state)
+      params (state),
+      midiMap (*this)
 {
+    midiMap.loadDefault();
     genisys_engine_init (engine.get(), 44100.0);
     for (auto& channel : playedNote)
         channel.fill (-1);
@@ -93,6 +95,11 @@ void GenisysProcessor::syncParametersToEngine()
 
 void GenisysProcessor::handleMidi (const juce::MidiMessage& message)
 {
+    // Mapped (or being learned) knobs and faders go to their parameter
+    // instead of their usual job (e.g. CC 1 = mod wheel vibrato).
+    if (message.isController() && midiMap.handleController (message.getControllerNumber(), message.getControllerValue()))
+        return;
+
     // General MIDI convention: channel 10 is drums. Drum hits are one-shots,
     // so their note-offs are ignored. With drums off, channel 10 plays FM.
     // Only notes go to the kit: controllers still reach the synth.
@@ -326,6 +333,7 @@ void GenisysProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto copy = state.copyState();
     copy.setProperty ("program", currentProgram, nullptr);
+    copy.appendChild (midiMap.toValueTree(), nullptr);
     if (auto xml = copy.createXml())
         copyXmlToBinary (*xml, destData);
 }
@@ -338,6 +346,13 @@ void GenisysProcessor::setStateInformation (const void* data, int sizeInBytes)
         {
             auto restored = juce::ValueTree::fromXml (*xml);
             currentProgram = restored.getProperty ("program", 0);
+            // Projects from before MIDI Learn have no map: keep the default.
+            const auto map = restored.getChildWithName (genisys::MidiMap::treeType);
+            if (map.isValid())
+            {
+                midiMap.fromValueTree (map);
+                restored.removeChild (map, nullptr);
+            }
             state.replaceState (restored);
         }
     }

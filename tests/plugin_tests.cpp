@@ -265,6 +265,131 @@ namespace
         check (p->getActiveVoices() == 0, "drum machine mode: no FM synth voice plays for drum notes");
     }
 
+    void sendCc (GenisysProcessor& p, int cc, int value)
+    {
+        juce::AudioBuffer<float> buffer (2, kBlock);
+        juce::MidiBuffer midi;
+        midi.addEvent (juce::MidiMessage::controllerEvent (1, cc, value), 0);
+        process (p, buffer, midi);
+    }
+
+    void testMidiLearn()
+    {
+        auto p = makeProcessor();
+        auto& map = p->midiMap;
+        map.clear();
+
+        map.startLearning ("macro_bright");
+        sendCc (*p, 20, 127);
+        check (map.ccFor ("macro_bright") == 20, "midi learn: moving a knob links its CC to the waiting control");
+        check (map.learningParamId().isEmpty(), "midi learn: learning stops after one knob");
+
+        sendCc (*p, 20, 0);
+        check (intParam (*p, "macro_bright") == -100, "midi learn: CC 0 = the control's minimum");
+        sendCc (*p, 20, 127);
+        check (intParam (*p, "macro_bright") == 100, "midi learn: CC 127 = the control's maximum");
+
+        map.assign (21, "reverb_mix", 0.0f, 0.5f);
+        sendCc (*p, 21, 127);
+        check (intParam (*p, "reverb_mix") == 50, "midi learn: a range limits how far the knob goes");
+        map.assign (22, "echo_mix", 1.0f, 0.0f);
+        sendCc (*p, 22, 0);
+        check (intParam (*p, "echo_mix") == 100, "midi learn: MIN above MAX turns the knob around");
+
+        map.assign (30, "feedback");
+        map.assign (31, "feedback");
+        check (map.ccFor ("feedback") == 31, "midi learn: relearning a control moves it to the new CC");
+        sendCc (*p, 30, 127);
+        check (intParam (*p, "feedback") != 7, "midi learn: the old CC no longer moves it");
+
+        map.startLearning ("glide_time");
+        sendCc (*p, 64, 127);
+        check (map.ccFor ("glide_time") < 0, "midi learn: the sustain pedal is never learned");
+        map.stopLearning();
+    }
+
+    void testMidiLearnPickup()
+    {
+        auto p = makeProcessor();
+        auto& map = p->midiMap;
+        map.clear();
+        map.setPickup (true);
+        map.assign (40, "macro_attack");
+        // macro_attack sits at 0 (the middle). A knob turned all the way up
+        // shouldn't make it jump...
+        sendCc (*p, 40, 127);
+        check (intParam (*p, "macro_attack") == 0, "pickup: a far-away knob doesn't make the control jump");
+        // ...until it comes back past the current value.
+        sendCc (*p, 40, 64);
+        sendCc (*p, 40, 0);
+        check (intParam (*p, "macro_attack") == -100, "pickup: after catching up, the knob takes over");
+    }
+
+    void testMidiMapSavedWithProject()
+    {
+        auto p = makeProcessor();
+        p->midiMap.clear();
+        p->midiMap.assign (55, "psg_level", 0.25f, 0.75f);
+        p->midiMap.setPickup (true);
+        juce::MemoryBlock saved;
+        p->getStateInformation (saved);
+
+        auto q = makeProcessor();
+        q->midiMap.loadLayout (genisys::MidiMap::Layout::generic);
+        q->setStateInformation (saved.getData(), (int) saved.getSize());
+        const auto maps = q->midiMap.getMappings();
+        check (maps.size() == 1 && maps[0].cc == 55 && maps[0].paramId == "psg_level", "midi map: links are restored with the project");
+        check (maps.size() == 1 && std::abs (maps[0].min - 0.25f) < 1.0e-4f && std::abs (maps[0].max - 0.75f) < 1.0e-4f,
+               "midi map: ranges are restored with the project");
+        check (q->midiMap.pickupEnabled(), "midi map: the pickup setting is restored");
+
+        // A second save must not stack up old copies of the map.
+        juce::MemoryBlock again;
+        q->getStateInformation (again);
+        auto xml = juce::AudioProcessor::getXmlFromBinary (again.getData(), (int) again.getSize());
+        int mapCount = 0;
+        if (xml != nullptr)
+            for (auto* child : xml->getChildIterator())
+                mapCount += child->hasTagName ("MIDIMAP") ? 1 : 0;
+        check (mapCount == 1, "midi map: saved once per project, never duplicated");
+
+        // Projects from before MIDI Learn keep the user's default map.
+        auto r = makeProcessor();
+        r->midiMap.loadLayout (genisys::MidiMap::Layout::generic);
+        juce::ValueTree old = r->state.copyState();
+        juce::MemoryBlock oldBlock;
+        if (auto oldXml = old.createXml())
+            juce::AudioProcessor::copyXmlToBinary (*oldXml, oldBlock);
+        r->setStateInformation (oldBlock.getData(), (int) oldBlock.getSize());
+        check (r->midiMap.ccFor ("macro_bright") == 74, "midi map: an older project keeps the default links");
+    }
+
+    void testControllerLayouts()
+    {
+        auto p = makeProcessor();
+        auto& map = p->midiMap;
+        using Layout = genisys::MidiMap::Layout;
+
+        map.loadLayout (Layout::generic);
+        check (map.getMappings().size() == 12 && map.ccFor ("macro_bright") == 74 && map.ccFor ("macro_attack") == 73,
+               "layouts: generic uses the MIDI standard's sound-control CCs");
+        map.loadLayout (Layout::arturiaMiniLab);
+        check (map.getMappings().size() == 12 && map.ccFor ("macro_bright") == 74 && map.ccFor ("reverb_mix") == 16
+                   && map.ccFor ("master_gain") == 82,
+               "layouts: Arturia MiniLab knobs and faders");
+        map.loadLayout (Layout::akaiMpkMini);
+        check (map.getMappings().size() == 8 && map.ccFor ("macro_bright") == 70 && map.ccFor ("reverb_mix") == 77,
+               "layouts: Akai MPK Mini knobs");
+        map.loadLayout (Layout::novationLaunchkey);
+        check (map.getMappings().size() == 8 && map.ccFor ("macro_bright") == 21 && map.ccFor ("reverb_mix") == 28,
+               "layouts: Novation Launchkey pots");
+
+        // A volume fader at the top means normal volume (0 dB), not +12 dB.
+        map.loadLayout (Layout::arturiaMiniLab);
+        sendCc (*p, 82, 127);
+        check (std::abs (p->state.getRawParameterValue ("master_gain")->load()) < 0.05f, "layouts: volume fader tops out at 0 dB");
+    }
+
     void testSustainPedal()
     {
         auto p = makeProcessor();
@@ -470,6 +595,10 @@ int main()
     testPresetLoadsLayersAndEffects();
     testDrumsOnChannel10();
     testDrumMachineMode();
+    testMidiLearn();
+    testMidiLearnPickup();
+    testMidiMapSavedWithProject();
+    testControllerLayouts();
     testSustainPedal();
     testOctaveShiftReleasesCorrectNote();
     testEffectsOffIsUntouched();

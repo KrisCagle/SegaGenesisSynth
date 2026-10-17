@@ -227,3 +227,24 @@ Each phase ends with a working build, passing tests and a commit or PR.
 3. **Who builds:** Claude implements and explains; Kris approves installs, commits/pushes, releases and scope calls.
 4. **Platforms:** Windows + macOS + Linux, all built by GitHub Actions. Windows is the one tested by hand.
 5. **DS port:** out of scope for now. The focus is the VST only.
+
+## 11. After the first beta: v0.2 – v0.4 (planned 2026-10-17)
+
+Friends' feedback on v0.1: the most requested feature is controlling Genisys from a MIDI keyboard's knobs, like Arturia's instruments. Some presets also sound too alike, and drums couldn't be reached from Ableton.
+
+| Version | What | Status |
+|---|---|---|
+| **v0.2** | **Drum machine mode** (Drum Notes From: CH 10 / ALL MIDI) | Done |
+| | **MIDI Learn:** right-click or LEARN mode, per-link MIN/MAX range, pickup, saved with the project, user default map, map files | Done |
+| | **Factory controller layouts:** Generic (MIDI sound-control CCs), Arturia MiniLab 3, Akai MPK Mini, Novation Launchkey. More brands when people ask. | Done |
+| **v0.3** | **Preset overhaul:** measure which presets sound alike, redesign them using the chip's under-used features (detune, all 8 algorithms, SSG-EG, feedback, key scaling), grow to about 100 | Next |
+| | **User presets:** save your own sounds (FM + PSG + FX), favourites, browse by category | Next |
+| **v0.4** | **Expression:** velocity → brightness, aftertouch → vibrato/brightness | Planned |
+| | **FM arpeggiator** | Planned |
+| | **Window size** presets, **undo/redo** | Planned |
+| | **Furnace (.fui)** patch import | Planned |
+
+**Why a hardware map lives in the plugin, not the DAW:** every DAW has its own way of mapping controllers (Ableton's MIDI Map, Logic's Smart Controls...), and none of them carry over between DAWs. Built-in MIDI Learn works the same everywhere, including the Standalone app.
+
+**Not planned yet:** Apple code signing ($99/year) would remove the macOS "Open Anyway" step. Kris decides.
+

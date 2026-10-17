@@ -7,6 +7,7 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 
 #include "PluginProcessor.h"
+#include "ui/MidiPanels.h"
 #include "ui/Panels.h"
 #include "ui/Widgets.h"
 
@@ -15,6 +16,7 @@
 // Everything is laid out on a fixed 1000 x 690 "design" canvas and scaled as
 // a whole when the window is resized, so the pixel art stays in proportion.
 class GenisysEditor final : public juce::AudioProcessorEditor,
+                            public genisys::ui::ParameterMenuHandler,
                             private juce::Timer
 {
 public:
@@ -24,9 +26,15 @@ public:
     void resized() override;
     bool keyPressed (const juce::KeyPress&) override;
 
-    // Switches to a tab (0 = VOICE .. 5 = MOD), as clicking it would.
+    // Switches to a tab (0 = VOICE .. 6 = MIDI), as clicking it would.
     void selectTab (int index);
-    static constexpr int numTabs = 6;
+    static constexpr int numTabs = 7;
+
+    // MIDI Learn mode: outlines every mappable control; click one, then
+    // move a hardware knob. (Also used by the UI snapshot tool.)
+    void setLearnMode (bool on);
+
+    void showParameterMenu (juce::Component& source, juce::RangedAudioParameter&) override;
     void mouseMove (const juce::MouseEvent&) override;
     void mouseEnter (const juce::MouseEvent&) override;
 
@@ -68,6 +76,10 @@ private:
     void buildDrumsPage (Page&);
     void buildFxPage (Page&);
     void buildModPage (Page&);
+    void buildMidiPage (Page&);
+    void refreshMidiMap();
+    void loadControllerMap();
+    void saveControllerMap();
     void showPage (int index);
     void setKeyboardToDrums (bool drums);
     void shiftOctave (int delta);
@@ -77,6 +89,7 @@ private:
     juce::RangedAudioParameter& param (const char* id);
 
     GenisysProcessor& genisys;
+    juce::LookAndFeel_V4 lookAndFeel; // themes pop-up menus; outlives every child
 
     // The design canvas (scaled as a whole) with chassis, scanlines etc.
     class Canvas : public juce::Component
@@ -91,8 +104,18 @@ private:
     genisys::ui::Logo logo;
     genisys::ui::PresetCartridge cartridge;
     genisys::ui::PadButton loadButton { "A", "LOAD" }, saveButton { "B", "SAVE" }, compareButton { "C", "A/B: A" };
-    genisys::ui::TabBar tabs { { "VOICE", "OPERATORS", "PSG", "DRUMS", "FX", "MOD" } };
-    std::array<Page, 6> pages;
+    genisys::ui::TabBar tabs { { "VOICE", "OPERATORS", "PSG", "DRUMS", "FX", "MOD", "MIDI" } };
+    std::array<Page, numTabs> pages;
+    int currentPage = 0;
+
+    genisys::ui::PixelButton learnButton { "LEARN" };
+    genisys::ui::LearnOverlay learnOverlay;
+    genisys::ui::MappingList* mappingList = nullptr;
+    genisys::ui::LedToggle* pickupToggle = nullptr;
+    bool learnMode = false;
+    juce::String lastLearning;
+    juce::uint32 shownMapVersion = 0;
+    int blinkTicks = 0;
     std::array<genisys::ui::OperatorCard*, 4> cards {};
 
     genisys::ui::HelpBox help;

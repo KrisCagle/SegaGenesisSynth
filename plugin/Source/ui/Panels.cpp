@@ -180,6 +180,7 @@ AlgorithmPicker::AlgorithmPicker (juce::RangedAudioParameter& p)
     : param (p), attachment (p, [this] (float v) { selected = juce::jlimit (0, 7, (int) std::lround (v)); repaint(); })
 {
     attachment.sendInitialUpdate();
+    markMappable (*this, p);
 }
 
 juce::String AlgorithmPicker::describe (int a)
@@ -280,6 +281,8 @@ void AlgorithmPicker::mouseMove (const juce::MouseEvent& e)
 
 void AlgorithmPicker::mouseDown (const juce::MouseEvent& e)
 {
+    if (handleParameterMenuClick (*this, param, e))
+        return;
     for (int a = 0; a < 8; ++a)
         if (cell (a).contains (e.position))
             attachment.setValueAsCompleteGesture ((float) a);

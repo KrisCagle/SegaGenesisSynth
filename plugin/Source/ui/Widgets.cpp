@@ -5,6 +5,7 @@ namespace genisys::ui
 namespace
 {
     const juce::Identifier helpId ("genisysHelp");
+    const juce::Identifier mappableId ("genisysParam");
 
     void drawBevelBox (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour top, juce::Colour bottom)
     {
@@ -30,6 +31,28 @@ juce::String getHelp (const juce::Component& c)
         if (p->getProperties().contains (helpId))
             return p->getProperties()[helpId].toString();
     return {};
+}
+
+void markMappable (juce::Component& c, const juce::RangedAudioParameter& p)
+{
+    c.getProperties().set (mappableId, p.getParameterID());
+}
+
+juce::String getMappableParamId (const juce::Component& c)
+{
+    for (auto* p = &c; p != nullptr; p = p->getParentComponent())
+        if (p->getProperties().contains (mappableId))
+            return p->getProperties()[mappableId].toString();
+    return {};
+}
+
+bool handleParameterMenuClick (juce::Component& source, juce::RangedAudioParameter& p, const juce::MouseEvent& e)
+{
+    if (! e.mods.isPopupMenu())
+        return false;
+    if (auto* handler = source.findParentComponentOfClass<ParameterMenuHandler>())
+        handler->showParameterMenu (source, p);
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -59,6 +82,7 @@ RetroKnob::RetroKnob (juce::RangedAudioParameter& p, juce::String l, bool isSmal
       small (isSmall)
 {
     attachment.sendInitialUpdate();
+    markMappable (*this, p);
     setSize (small ? smallWidth : normalWidth, small ? smallHeight : normalHeight);
     setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
 }
@@ -84,22 +108,34 @@ void RetroKnob::setFromPosition (float pos, bool asGesture)
         attachment.setValueAsCompleteGesture (denorm);
 }
 
-void RetroKnob::mouseDown (const juce::MouseEvent&)
+void RetroKnob::mouseDown (const juce::MouseEvent& e)
 {
+    if (handleParameterMenuClick (*this, param, e))
+        return;
     dragStartPos = position();
+    dragging = true;
     attachment.beginGesture();
 }
 
 void RetroKnob::mouseDrag (const juce::MouseEvent& e)
 {
+    if (! dragging)
+        return;
     const float pixelsForFullTurn = e.mods.isShiftDown() ? 1200.0f : 200.0f;
     setFromPosition (dragStartPos - (float) e.getDistanceFromDragStartY() / pixelsForFullTurn, true);
 }
 
-void RetroKnob::mouseUp (const juce::MouseEvent&) { attachment.endGesture(); }
-
-void RetroKnob::mouseDoubleClick (const juce::MouseEvent&)
+void RetroKnob::mouseUp (const juce::MouseEvent&)
 {
+    if (dragging)
+        attachment.endGesture();
+    dragging = false;
+}
+
+void RetroKnob::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu())
+        return;
     attachment.setValueAsCompleteGesture (param.convertFrom0to1 (param.getDefaultValue()));
 }
 
@@ -176,6 +212,7 @@ SegmentedChoice::SegmentedChoice (juce::RangedAudioParameter& p, juce::StringArr
       labels (std::move (l))
 {
     attachment.sendInitialUpdate();
+    markMappable (*this, p);
 }
 
 void SegmentedChoice::paint (juce::Graphics& g)
@@ -198,6 +235,8 @@ void SegmentedChoice::paint (juce::Graphics& g)
 
 void SegmentedChoice::mouseDown (const juce::MouseEvent& e)
 {
+    if (handleParameterMenuClick (*this, param, e))
+        return;
     const int index = juce::jlimit (0, labels.size() - 1, (int) ((float) e.x / (float) getWidth() * (float) labels.size()));
     attachment.setValueAsCompleteGesture (param.convertFrom0to1 (0.0f) + (float) index);
 }
@@ -208,6 +247,7 @@ LedToggle::LedToggle (juce::RangedAudioParameter& p, juce::String l)
 {
     attachment = std::make_unique<juce::ParameterAttachment> (p, [this] (float v) { on = v >= 0.5f; repaint(); });
     attachment->sendInitialUpdate();
+    markMappable (*this, p);
 }
 
 LedToggle::LedToggle (juce::String l) : label (std::move (l)) {}
@@ -220,8 +260,10 @@ void LedToggle::setOn (bool shouldBeOn)
     repaint();
 }
 
-void LedToggle::mouseDown (const juce::MouseEvent&)
+void LedToggle::mouseDown (const juce::MouseEvent& e)
 {
+    if (param != nullptr && handleParameterMenuClick (*this, *param, e))
+        return;
     setOn (! on);
     if (onChange)
         onChange (on);
@@ -255,12 +297,12 @@ void PixelButton::paint (juce::Graphics& g)
         r = r.translated (0.0f, 1.0f);
     g.setColour (theme::bevelDark);
     g.fillRect (r);
-    g.setColour (isMouseOver() ? theme::yellow : theme::bevelLight);
+    g.setColour (isMouseOver() || lit ? theme::yellow : theme::bevelLight);
     g.fillRect (r.reduced (1.0f));
-    g.setColour (juce::Colour (0xff061650));
+    g.setColour (lit ? theme::yellow : juce::Colour (0xff061650));
     g.fillRect (r.reduced (3.0f));
-    PixelFont::drawIn (g, text.toUpperCase(), r, 1.1f, isMouseOver() ? theme::yellow : theme::text,
-                       juce::Justification::centred);
+    PixelFont::drawIn (g, text.toUpperCase(), r, 1.1f, lit ? juce::Colour (0xff111111) : (isMouseOver() ? theme::yellow : theme::text),
+                       juce::Justification::centred, ! lit);
 }
 
 void PixelButton::mouseDown (const juce::MouseEvent&) { pressed = true; repaint(); }

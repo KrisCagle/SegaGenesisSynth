@@ -91,6 +91,7 @@ The installer puts the VST3, the Audio Unit and the Standalone app in the right 
   - **DRUMS:** the drum kit.
   - **FX:** chorus, echo and reverb.
   - **MOD:** LFO, vibrato and pitch bend.
+  - **MIDI:** your MIDI keyboard's knob links (MIDI Learn).
 - **Quick Sound:**
   - BRIGHT, ATTACK, DECAY and RELEASE reshape any preset without needing to know FM.
   - Setting them back to 0 returns the preset to how it was made.
@@ -103,6 +104,13 @@ The installer puts the VST3, the Audio Unit and the Standalone app in the right 
   - **Drum machine (Ableton and most DAWs):** put a second Genisys on its own track and set **Drum Notes From** to **ALL MIDI**. Every note on that track now plays the kit, whatever MIDI channel it's on. Drop any drum MIDI clip on the track and it just works.
   - You can also click the pads, or switch on **Keys Play Drums**.
   - Note names differ between DAWs: Ableton calls the kick note **C1**, other DAWs call it C2. It's the same note (MIDI 36).
+- **Knobs on your MIDI keyboard (MIDI Learn):**
+  - Right-click any knob, switch or choice → **MIDI Learn**, then turn a knob or fader on your keyboard. They're linked.
+  - Or press **LEARN** (top right): every control you can link gets an outline. Click one, turn a hardware knob, repeat. Press **LEARN** or **Esc** when you're done.
+  - The **MIDI** tab lists every link. Drag **MIN** and **MAX** to limit how far a knob goes (MIN above MAX turns it around), or **X** to remove it.
+  - **Factory layouts** for **Arturia MiniLab**, **Akai MPK Mini** and **Novation Launchkey** work straight away. Their 8 knobs control brightness, attack, decay, release, feedback, vibrato, echo and reverb. **Generic** uses the MIDI standard's sound-control numbers (CC 74 brightness, 73 attack, 72 release...), which many keyboards send.
+  - **Pickup** stops sounds jumping when a hardware knob is somewhere else: the knob takes over once it reaches the current setting.
+  - Links are saved with your project. **Set as default** makes every new Genisys start with them. **Save map / Load map** share them as a file.
 - **Patches:**
   - **A** loads community Genesis patches (`.tfi`, `.vgi`, `.dmp`).
   - **B** saves your sound as `.tfi`.
@@ -141,6 +149,7 @@ The installer puts the VST3, the Audio Unit and the Standalone app in the right 
   - hi-hats and cymbals on the PSG noise channel
 - **PSG layer:** the square-wave channels can double your FM notes or play a chiptune arpeggio, with envelopes that step at 60 Hz like the original sound drivers.
 - **Playing:** velocity, pitch bend, mod-wheel vibrato and sustain pedal; Poly, Mono and Legato modes with glide; stereo Unison; an Octave shift.
+- **MIDI Learn:** link any hardware knob or fader to any control, with ranges, pickup, and ready-made layouts for popular keyboards.
 - **Effects:** chorus, echo (tempo-synced, ping-pong) and reverb.
 - **Patch files:** load community Genesis patches (`.tfi`, `.vgi`, `.dmp`) and save your sounds as `.tfi`.
 - **Demo renderer** (`tools/genisys_render`): writes demo WAVs, so you can hear the engine without a DAW.

@@ -7,6 +7,7 @@
 #include <juce_audio_devices/juce_audio_devices.h> // MidiMessageCollector
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include "MidiMap.h"
 #include "Parameters.h"
 
 // The Genisys plugin: wraps one GenisysEngine and connects it to the host's
@@ -72,6 +73,10 @@ public:
     // Other MIDI from the editor (on-screen pitch bend and mod wheels).
     // Thread-safe: the editor adds, processBlock drains.
     juce::MidiMessageCollector editorMidi;
+
+    // MIDI Learn: hardware knobs (CCs) linked to parameters. Saved with the
+    // project; a new Genisys starts from the user's default map.
+    genisys::MidiMap midiMap;
 
 private:
     void syncParametersToEngine();
