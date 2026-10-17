@@ -68,6 +68,8 @@ namespace
 }
 
 const juce::Identifier MidiMap::treeType ("MIDIMAP");
+const juce::String MidiMap::previousPresetId ("@preset_prev");
+const juce::String MidiMap::nextPresetId ("@preset_next");
 
 MidiMap::MidiMap (juce::AudioProcessor& processor)
 {
@@ -120,8 +122,16 @@ bool MidiMap::handleController (int cc, int value)
 
     auto& slot = slots[(size_t) cc];
     const int index = slot.param.load();
-    if (index < 0 || index >= (int) params.size())
+    if (! isTarget (index))
         return false;
+
+    if (index == previousPresetTarget || index == nextPresetTarget)
+    {
+        // Pads and buttons send 127 when pressed (and often 0 on release).
+        if (value >= 64)
+            pendingPresetSteps += index == nextPresetTarget ? 1 : -1;
+        return true;
+    }
 
     auto* param = params[(size_t) index];
     const float min = slot.min.load(), max = slot.max.load();
@@ -158,8 +168,22 @@ bool MidiMap::handleController (int cc, int value)
 }
 
 // ---------------------------------------------------------------------------
+bool MidiMap::isTarget (int index) const
+{
+    return (index >= 0 && index < (int) params.size()) || index == previousPresetTarget || index == nextPresetTarget;
+}
+
+juce::String MidiMap::idOf (int index) const
+{
+    if (index == previousPresetTarget) return previousPresetId;
+    if (index == nextPresetTarget) return nextPresetId;
+    return index >= 0 && index < (int) params.size() ? params[(size_t) index]->getParameterID() : juce::String();
+}
+
 int MidiMap::indexOf (const juce::String& paramId) const
 {
+    if (paramId == previousPresetId) return previousPresetTarget;
+    if (paramId == nextPresetId) return nextPresetTarget;
     for (size_t i = 0; i < params.size(); ++i)
         if (params[i]->getParameterID() == paramId)
             return (int) i;
@@ -195,8 +219,7 @@ void MidiMap::stopLearning()
 
 juce::String MidiMap::learningParamId() const
 {
-    const int index = learnTarget.load();
-    return index >= 0 && index < (int) params.size() ? params[(size_t) index]->getParameterID() : juce::String();
+    return idOf (learnTarget.load());
 }
 
 void MidiMap::assign (int cc, const juce::String& paramId, float min, float max)
@@ -258,22 +281,25 @@ std::vector<MidiMap::Mapping> MidiMap::getMappings() const
     for (size_t cc = 0; cc < slots.size(); ++cc)
     {
         const int index = slots[cc].param.load();
-        if (index >= 0 && index < (int) params.size())
-            out.push_back ({ (int) cc, params[(size_t) index]->getParameterID(), slots[cc].min.load(), slots[cc].max.load() });
+        if (isTarget (index))
+            out.push_back ({ (int) cc, idOf (index), slots[cc].min.load(), slots[cc].max.load() });
     }
     return out;
 }
 
 juce::String MidiMap::parameterName (const juce::String& paramId) const
 {
-    const int index = indexOf (paramId);
-    return index >= 0 ? params[(size_t) index]->getName (64) : paramId;
+    if (paramId == previousPresetId) return "Previous Preset";
+    if (paramId == nextPresetId) return "Next Preset";
+    if (auto* param = getParameter (paramId))
+        return param->getName (64);
+    return paramId;
 }
 
 juce::RangedAudioParameter* MidiMap::getParameter (const juce::String& paramId) const
 {
     const int index = indexOf (paramId);
-    return index >= 0 ? params[(size_t) index] : nullptr;
+    return index >= 0 && index < (int) params.size() ? params[(size_t) index] : nullptr;
 }
 
 // ---------------------------------------------------------------------------

@@ -237,7 +237,8 @@ Friends' feedback on v0.1: the most requested feature is controlling Genisys fro
 | **v0.2** | **Drum machine mode** (Drum Notes From: CH 10 / ALL MIDI) | Done |
 | | **MIDI Learn:** right-click or LEARN mode, per-link MIN/MAX range, pickup, saved with the project, user default map, map files | Done |
 | | **Factory controller layouts:** Generic (MIDI sound-control CCs), Arturia MiniLab 3, Akai MPK Mini, Novation Launchkey. More brands when people ask. | Done |
-| **v0.3** | **Preset overhaul:** measure which presets sound alike, redesign them using the chip's under-used features (detune, all 8 algorithms, SSG-EG, feedback, key scaling), grow to about 100 | Next |
+| | **Preset buttons:** ← → arrow keys, MIDI-learnable Previous/Next Preset pads, Program Change | Done |
+| **v0.3** | **Preset overhaul:** measure which presets sound alike (`tools/preset_similarity`), redesign them using the chip's under-used features (detune, all 8 algorithms, SSG-EG, feedback, key scaling), grow to about 100 | Done: 101 presets, closest pair 6.1 (was 2.8) |
 | | **User presets:** save your own sounds (FM + PSG + FX), favourites, browse by category | Next |
 | **v0.4** | **Expression:** velocity → brightness, aftertouch → vibrato/brightness | Planned |
 | | **FM arpeggiator** | Planned |

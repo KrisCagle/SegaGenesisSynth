@@ -38,7 +38,9 @@ void Logo::paint (juce::Graphics& g)
 // ---------------------------------------------------------------------------
 PresetCartridge::PresetCartridge (GenisysProcessor& p) : processor (p)
 {
-    setHelp (*this, "PRESET CARTRIDGE", "Choose a sound. Click the arrows to step through presets, or click the label for the full list by category.");
+    setHelp (*this, "PRESET CARTRIDGE",
+             "Choose a sound. Click the arrows (or press the LEFT and RIGHT arrow keys) to step through presets, or click the label "
+             "for the full list. Right-click an arrow to step presets from a pad or button on your MIDI keyboard.");
     refresh();
 }
 
@@ -59,13 +61,19 @@ void PresetCartridge::refresh()
 
 void PresetCartridge::step (int delta)
 {
-    const int n = processor.getNumPrograms();
-    processor.setCurrentProgram ((processor.getCurrentProgram() + delta + n) % n);
+    processor.stepPreset (delta);
     refresh();
 }
 
 void PresetCartridge::mouseDown (const juce::MouseEvent& e)
 {
+    if (e.mods.isPopupMenu())
+    {
+        if (leftArrow().contains (e.position) || rightArrow().contains (e.position))
+            if (auto* handler = findParentComponentOfClass<ParameterMenuHandler>())
+                handler->showActionMenu (*this, leftArrow().contains (e.position) ? MidiMap::previousPresetId : MidiMap::nextPresetId);
+        return;
+    }
     if (leftArrow().contains (e.position)) { step (-1); return; }
     if (rightArrow().contains (e.position)) { step (1); return; }
 

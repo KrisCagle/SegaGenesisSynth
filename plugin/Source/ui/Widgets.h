@@ -26,6 +26,9 @@ namespace genisys::ui
     public:
         virtual ~ParameterMenuHandler() = default;
         virtual void showParameterMenu (juce::Component& source, juce::RangedAudioParameter&) = 0;
+        // MIDI menu for something that isn't a parameter (e.g. the preset
+        // arrows); `actionId` is a MidiMap target such as nextPresetId.
+        virtual void showActionMenu (juce::Component& source, const juce::String& actionId) = 0;
     };
 
     // Opens `source`'s parameter menu if `e` is a right-click (or Ctrl-click

@@ -390,6 +390,47 @@ namespace
         check (std::abs (p->state.getRawParameterValue ("master_gain")->load()) < 0.05f, "layouts: volume fader tops out at 0 dB");
     }
 
+    void testPresetButtons()
+    {
+        auto p = makeProcessor();
+        auto& map = p->midiMap;
+        map.clear();
+        const int last = p->getNumPrograms() - 1;
+
+        map.startLearning (genisys::MidiMap::nextPresetId);
+        sendCc (*p, 60, 127);
+        check (map.ccFor (genisys::MidiMap::nextPresetId) == 60, "preset buttons: a pad can be learned as Next Preset");
+        map.assign (61, genisys::MidiMap::previousPresetId);
+
+        p->setCurrentProgram (5);
+        sendCc (*p, 60, 127); // press
+        sendCc (*p, 60, 0);   // release: no second step
+        p->applyPendingPresetChanges();
+        check (p->getCurrentProgram() == 6, "preset buttons: one press steps one preset forward");
+
+        p->setCurrentProgram (0);
+        sendCc (*p, 61, 127);
+        p->applyPendingPresetChanges();
+        check (p->getCurrentProgram() == last, "preset buttons: Previous wraps around to the last preset");
+
+        p->stepPreset (1);
+        check (p->getCurrentProgram() == 0, "preset buttons: Next wraps around to the first preset");
+
+        juce::AudioBuffer<float> buffer (2, kBlock);
+        juce::MidiBuffer midi;
+        midi.addEvent (juce::MidiMessage::programChange (1, 10), 0);
+        process (*p, buffer, midi);
+        p->applyPendingPresetChanges();
+        check (p->getCurrentProgram() == 10, "program change: picks the preset by number");
+
+        // The preset links survive a save and reload.
+        juce::MemoryBlock saved;
+        p->getStateInformation (saved);
+        auto q = makeProcessor();
+        q->setStateInformation (saved.getData(), (int) saved.getSize());
+        check (q->midiMap.ccFor (genisys::MidiMap::previousPresetId) == 61, "preset buttons: links are saved with the project");
+    }
+
     void testSustainPedal()
     {
         auto p = makeProcessor();
@@ -599,6 +640,7 @@ int main()
     testMidiLearnPickup();
     testMidiMapSavedWithProject();
     testControllerLayouts();
+    testPresetButtons();
     testSustainPedal();
     testOctaveShiftReleasesCorrectNote();
     testEffectsOffIsUntouched();

@@ -31,6 +31,10 @@ namespace genisys
             float min = 0.0f, max = 1.0f; // normalised 0..1 parameter range
         };
 
+        // Besides parameters, a CC can step through presets: pressing a
+        // pad or button (any value from 64 up) moves one preset along.
+        static const juce::String previousPresetId, nextPresetId;
+
         // Factory layouts for popular controllers (see MidiMap.cpp).
         enum class Layout { generic, arturiaMiniLab, akaiMpkMini, novationLaunchkey };
         static juce::String layoutName (Layout);
@@ -66,6 +70,12 @@ namespace genisys
         // changed).
         juce::uint32 getVersion() const { return version.load(); }
 
+        // Preset steps asked for by mapped buttons since the last call
+        // (negative = back). The processor applies them on the message
+        // thread, since loading a preset sets every parameter.
+        bool hasPendingPresetSteps() const { return pendingPresetSteps.load() != 0; }
+        int takePresetSteps() { return pendingPresetSteps.exchange (0); }
+
         juce::ValueTree toValueTree() const;
         void fromValueTree (const juce::ValueTree&);
         static const juce::Identifier treeType;
@@ -81,6 +91,12 @@ namespace genisys
 
     private:
         int indexOf (const juce::String& paramId) const;
+        bool isTarget (int index) const;
+        juce::String idOf (int index) const;
+
+        // Slot targets beyond the parameter list.
+        static constexpr int previousPresetTarget = 1 << 20, nextPresetTarget = previousPresetTarget + 1;
+        std::atomic<int> pendingPresetSteps { 0 };
         void assignIndex (int cc, int paramIndex, float min, float max);
 
         std::vector<juce::RangedAudioParameter*> params;

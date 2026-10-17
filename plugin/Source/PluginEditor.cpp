@@ -178,7 +178,9 @@ GenisysEditor::GenisysEditor (GenisysProcessor& p)
     keyboard.setColour (juce::MidiKeyboardComponent::keyDownOverlayColourId, theme::yellow);
     keyboard.setColour (juce::MidiKeyboardComponent::mouseOverKeyOverlayColourId, theme::cyan.withAlpha (0.35f));
     keyboard.setColour (juce::MidiKeyboardComponent::shadowColourId, juce::Colours::black.withAlpha (0.5f));
-    setHelp (keyboard, "KEYBOARD", "Click to play, or use A W S E D F T G Y H U J K on your computer keyboard. Z / X change octave.");
+    setHelp (keyboard, "KEYBOARD",
+             "Click to play, or use A W S E D F T G Y H U J K on your computer keyboard. Z / X change octave. LEFT / RIGHT arrows "
+             "change preset.");
     setKeyboardToDrums (false);
 
     // Hover help: listen to mouse movement anywhere on the canvas.
@@ -279,6 +281,32 @@ void GenisysEditor::showParameterMenu (juce::Component& source, juce::RangedAudi
                                 param->beginChangeGesture();
                                 param->setValueNotifyingHost (param->getDefaultValue());
                                 param->endChangeGesture();
+                            }
+                        });
+}
+
+void GenisysEditor::showActionMenu (juce::Component& source, const juce::String& actionId)
+{
+    auto& map = genisys.midiMap;
+    const int cc = map.ccFor (actionId);
+    juce::PopupMenu menu;
+    menu.addSectionHeader (map.parameterName (actionId));
+    menu.addItem (1, cc >= 0 ? "MIDI Learn (now CC " + juce::String (cc) + ")" : juce::String ("MIDI Learn"));
+    menu.addItem (2, "Forget MIDI link", cc >= 0);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&source),
+                        [this, actionId] (int result)
+                        {
+                            auto& m = genisys.midiMap;
+                            if (result == 1)
+                            {
+                                m.startLearning (actionId);
+                                help.show ("MIDI LEARN|Press the pad or button on your MIDI keyboard that should go to the "
+                                           + m.parameterName (actionId) + ". Esc cancels.");
+                            }
+                            else if (result == 2)
+                            {
+                                m.forgetParam (actionId);
+                                help.show ("MIDI LEARN|Unlinked " + m.parameterName (actionId) + ".");
                             }
                         });
 }
@@ -475,8 +503,24 @@ void GenisysEditor::buildMidiPage (Page& page)
     auto& clear = page.add<PixelButton> ({ 14, 270, 272, 24 }, "CLEAR ALL");
     setHelp (clear, "CLEAR ALL", "Remove every link.");
     clear.onClick = [this] { genisys.midiMap.clear(); help.show ("CLEAR ALL|Every link removed."); };
-    page.add<PixelText> ({ 14, 304, 272, 56 }, "Right-click any knob for MIDI Learn. Your links are saved with the project.",
-                         1.1f, theme::textDim, true);
+    page.add<PixelText> ({ 14, 302, 272, 12 }, "PRESET BUTTONS", 1.15f, theme::text);
+    struct PresetButton { juce::String id; const char* label; int x; };
+    const PresetButton presetButtons[] = { { genisys::MidiMap::previousPresetId, "LEARN PREV", 14 },
+                                           { genisys::MidiMap::nextPresetId, "LEARN NEXT", 154 } };
+    for (const auto& pb : presetButtons)
+    {
+        auto& b = page.add<PixelButton> ({ pb.x, 318, 132, 24 }, pb.label);
+        setHelp (b, "PRESET BUTTONS",
+                 "Step through presets from your MIDI keyboard: click, then press a pad or button on it. The LEFT and RIGHT arrow "
+                 "keys on your computer do the same.");
+        const auto target = pb.id;
+        b.onClick = [this, target]
+        {
+            genisys.midiMap.startLearning (target);
+            help.show ("MIDI LEARN|Press the pad or button on your MIDI keyboard that should go to the "
+                       + genisys.midiMap.parameterName (target) + ". Esc cancels.");
+        };
+    }
 
     page.add<MenuWindow> ({ 310, 0, 658, 372 }, "KNOB LINKS");
     mappingList = &page.add<MappingList> ({ 322, 32, 634, 326 }, genisys.midiMap);
@@ -652,6 +696,12 @@ bool GenisysEditor::keyPressed (const juce::KeyPress& key)
             genisys.midiMap.stopLearning();
             help.show ("MIDI LEARN|Cancelled.");
         }
+        return true;
+    }
+    if (key == juce::KeyPress::leftKey || key == juce::KeyPress::rightKey)
+    {
+        genisys.stepPreset (key == juce::KeyPress::rightKey ? 1 : -1);
+        cartridge.refresh();
         return true;
     }
     const auto c = juce::CharacterFunctions::toLowerCase (key.getTextCharacter());

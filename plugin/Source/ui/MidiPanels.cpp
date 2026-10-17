@@ -167,9 +167,7 @@ void MappingList::paint (juce::Graphics& g)
         if (row >= (int) rows.size())
             break;
         const auto& m = rows[(size_t) row];
-        auto* param = map.getParameter (m.paramId);
-        if (param == nullptr)
-            continue;
+        auto* param = map.getParameter (m.paramId); // null for preset buttons
 
         const auto rowArea = cell (i, ccColumn).withRight ((float) getWidth());
         g.setColour (juce::Colour (0xff061650).withAlpha (i % 2 == 0 ? 0.9f : 0.5f));
@@ -177,8 +175,15 @@ void MappingList::paint (juce::Graphics& g)
 
         PixelFont::drawIn (g, juce::String (m.cc), cell (i, ccColumn).reduced (4.0f, 0.0f), 1.15f, theme::cyan,
                            juce::Justification::centredLeft);
-        PixelFont::drawIn (g, param->getName (40).toUpperCase(), cell (i, nameColumn), 1.0f, theme::text,
+        PixelFont::drawIn (g, map.parameterName (m.paramId).toUpperCase(), cell (i, nameColumn), 1.0f, theme::text,
                            juce::Justification::centredLeft);
+        PixelFont::drawIn (g, "X", cell (i, forgetColumn), 1.3f, theme::red, juce::Justification::centred);
+        if (param == nullptr)
+        {
+            PixelFont::drawIn (g, "BUTTON: PRESS TO STEP", cell (i, minColumn).withRight (cell (i, maxColumn).getRight()), 1.0f,
+                               theme::textDim, juce::Justification::centred);
+            continue;
+        }
         for (auto c : { minColumn, maxColumn })
         {
             const auto box = cell (i, c).reduced (0.0f, 2.0f);
@@ -191,7 +196,6 @@ void MappingList::paint (juce::Graphics& g)
             PixelFont::drawIn (g, param->getText (value, 12).toUpperCase(), box, 1.0f, active ? theme::yellow : theme::cyan,
                                juce::Justification::centred, false);
         }
-        PixelFont::drawIn (g, "X", cell (i, forgetColumn), 1.3f, theme::red, juce::Justification::centred);
     }
 
     if ((int) rows.size() > visibleRows())
@@ -213,7 +217,7 @@ void MappingList::mouseDown (const juce::MouseEvent& e)
         refresh();
         return;
     }
-    if (column == minColumn || column == maxColumn)
+    if ((column == minColumn || column == maxColumn) && map.getParameter (m.paramId) != nullptr)
     {
         dragRow = row;
         dragColumn = column;
@@ -246,7 +250,7 @@ void MappingList::mouseDoubleClick (const juce::MouseEvent& e)
     // Double-click MIN or MAX: back to the control's full range.
     const int row = rowAt (e.position);
     const auto column = columnAt (e.position);
-    if (row < 0 || (column != minColumn && column != maxColumn))
+    if (row < 0 || (column != minColumn && column != maxColumn) || map.getParameter (rows[(size_t) row].paramId) == nullptr)
         return;
     auto& m = rows[(size_t) row];
     (column == minColumn ? m.min : m.max) = column == minColumn ? 0.0f : 1.0f;

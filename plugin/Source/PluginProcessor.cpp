@@ -35,7 +35,10 @@ GenisysProcessor::GenisysProcessor()
     scratchRight.resize (kScratchFrames);
 }
 
-GenisysProcessor::~GenisysProcessor() = default;
+GenisysProcessor::~GenisysProcessor()
+{
+    cancelPendingUpdate();
+}
 
 void GenisysProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
@@ -99,6 +102,13 @@ void GenisysProcessor::handleMidi (const juce::MidiMessage& message)
     // instead of their usual job (e.g. CC 1 = mod wheel vibrato).
     if (message.isController() && midiMap.handleController (message.getControllerNumber(), message.getControllerValue()))
         return;
+
+    // Program Change picks a preset by number (applied on the message thread).
+    if (message.isProgramChange())
+    {
+        pendingProgram = message.getProgramChangeNumber();
+        return;
+    }
 
     // General MIDI convention: channel 10 is drums. Drum hits are one-shots,
     // so their note-offs are ignored. With drums off, channel 10 plays FM.
@@ -223,6 +233,9 @@ void GenisysProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
 
     render (buffer, position, numSamples - position);
 
+    if (midiMap.hasPendingPresetSteps() || pendingProgram.load() >= 0)
+        triggerAsyncUpdate();
+
     // Effects, then Master Volume (ramped per sample to avoid clicks).
     if (auto* host = getPlayHead())
         if (auto hostPosition = host->getPosition())
@@ -293,6 +306,21 @@ void GenisysProcessor::setCurrentProgram (int index)
 
     currentProgram = index;
     genisys::params::applyPreset (state, index);
+}
+
+void GenisysProcessor::stepPreset (int delta)
+{
+    const int n = getNumPrograms();
+    if (n > 0 && delta != 0)
+        setCurrentProgram (((currentProgram + delta) % n + n) % n);
+}
+
+void GenisysProcessor::applyPendingPresetChanges()
+{
+    const int program = pendingProgram.exchange (-1);
+    if (program >= 0)
+        setCurrentProgram (program);
+    stepPreset (midiMap.takePresetSteps());
 }
 
 const juce::String GenisysProcessor::getProgramName (int index)

@@ -18,7 +18,8 @@
 //    engine is touched after prepareToPlay.
 //  - The UI and host automation change parameters on other threads; those
 //    land in APVTS's atomics, which processBlock reads once per block.
-class GenisysProcessor final : public juce::AudioProcessor
+class GenisysProcessor final : public juce::AudioProcessor,
+                               private juce::AsyncUpdater
 {
 public:
     GenisysProcessor();
@@ -44,6 +45,14 @@ public:
     int getCurrentProgram() override { return currentProgram; }
     void setCurrentProgram (int index) override;
     const juce::String getProgramName (int index) override;
+
+    // Moves `delta` presets along, wrapping around. Message thread.
+    void stepPreset (int delta);
+
+    // Preset changes asked for from the audio thread (mapped preset
+    // buttons, MIDI program changes) are applied here, on the message
+    // thread. Runs by itself; public so tests can run it directly.
+    void applyPendingPresetChanges();
     void changeProgramName (int, const juce::String&) override {}
 
     // ---- Telemetry for the editor (written on the audio thread, read on the
@@ -79,6 +88,7 @@ public:
     genisys::MidiMap midiMap;
 
 private:
+    void handleAsyncUpdate() override { applyPendingPresetChanges(); }
     void syncParametersToEngine();
     void handleMidi (const juce::MidiMessage& message);
     void render (juce::AudioBuffer<float>& buffer, int start, int count);
@@ -101,6 +111,7 @@ private:
     std::vector<float> scratchLeft, scratchRight;
 
     int currentProgram = 0;
+    std::atomic<int> pendingProgram { -1 }; // from a MIDI program change
 
     std::atomic<uint8_t> activeVoices { 0 };
     static constexpr int kScopeSize = 4096;

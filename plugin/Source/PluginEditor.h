@@ -35,6 +35,7 @@ public:
     void setLearnMode (bool on);
 
     void showParameterMenu (juce::Component& source, juce::RangedAudioParameter&) override;
+    void showActionMenu (juce::Component& source, const juce::String& actionId) override;
     void mouseMove (const juce::MouseEvent&) override;
     void mouseEnter (const juce::MouseEvent&) override;
 

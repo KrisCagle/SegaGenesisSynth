@@ -77,8 +77,9 @@ The installer puts the VST3, the Audio Unit and the Standalone app in the right 
 ![Genisys, OPERATORS page](docs/images/genisys-operators.png)
 
 - **Pick a sound:**
-  - There are 66 presets in 12 categories.
-  - Use the **◀ ▶** arrows on the cartridge, or click its label for the full list.
+  - There are 101 presets in 12 categories.
+  - Use the **◀ ▶** arrows on the cartridge (or the **← →** arrow keys on your computer), or click its label for the full list.
+  - To step presets from your MIDI keyboard, right-click a cartridge arrow → **MIDI Learn** and press a pad or button. MIDI Program Change messages pick presets too.
 - **Hover for help:**
   - The black text box at the bottom explains whatever your mouse is over.
 - **Knobs:**
