@@ -32,6 +32,10 @@ jobs:
             pluginval: pluginval_Linux.zip
             pluginval_exe: xvfb-run -a ./pluginval
             pluginval_flags: --skip-gui-tests # no display on the Linux runner
+            # Two compile/link jobs at a time: four at once can run the
+            # runner out of memory while linking JUCE with LTO, and GitHub
+            # then stops it with a "shutdown signal".
+            build_jobs: 2
 
     steps:
       - uses: actions/checkout@v4
@@ -49,7 +53,7 @@ jobs:
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake_extra }}
 
       - name: Build
-        run: cmake --build build --config Release --parallel
+        run: cmake --build build --config Release --parallel ${{ matrix.build_jobs }}
 
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
