@@ -10,6 +10,7 @@
 #include "genisys_drums.h"
 #include "genisys_engine.h"
 #include "genisys_presets.h"
+#include "../tools/preset_fingerprint.h"
 #include "../tools/preset_loudness.h"
 
 static int g_failures = 0;
@@ -754,8 +755,8 @@ static void test_preset_library_shape(void) {
             }
         }
     }
-    snprintf(msg, sizeof msg, "the factory library has %d presets (want at least 60)", n);
-    CHECK(n >= 60, msg);
+    snprintf(msg, sizeof msg, "the factory library has %d presets (want at least 100)", n);
+    CHECK(n >= 100, msg);
     CHECK(categorised, "every preset has a category");
     CHECK(names_unique, "every preset has a unique name");
     CHECK(sounds_unique, "no two presets are the same sound");
@@ -777,6 +778,25 @@ static void test_presets_are_balanced(void) {
         }
     }
     CHECK(ok, "every preset plays within 2 dB of the target loudness (switching presets doesn't jump in volume)");
+}
+
+/* No two presets may sound nearly the same (friends' feedback on v0.1).
+ * Distances come from tools/preset_similarity; 5 is well below today's
+ * closest pair, and the original look-alikes measured under 3. */
+static void test_presets_sound_different(void) {
+    static PresetFingerprint prints[256];
+    const int n = genisys_preset_count() < 256 ? genisys_preset_count() : 256;
+    int i, j, ok = 1;
+    for (i = 1; i < n; i++) preset_fingerprint(&g_engine, i, &prints[i]);
+    for (i = 1; i < n; i++)
+        for (j = i + 1; j < n; j++) {
+            double d = preset_fingerprint_distance(&prints[i], &prints[j]);
+            if (d < 5.0) {
+                printf("  too alike: %s ~ %s (%.2f, run tools/preset_similarity)\n", genisys_preset_name(i), genisys_preset_name(j), d);
+                ok = 0;
+            }
+        }
+    CHECK(ok, "no two presets sound nearly the same");
 }
 
 /* ---- Quick Sound macros ---- */
@@ -882,6 +902,7 @@ int main(void) {
     test_fm_psg_balance();
     test_preset_library_shape();
     test_presets_are_balanced();
+    test_presets_sound_different();
     test_macros();
     test_vibrato_macro();
     test_active_voices();

@@ -16,7 +16,7 @@
 
 #define PRESET_LOUDNESS_TARGET_DB (-20.0)
 
-static int preset_loudness_note(int index) {
+static inline int preset_loudness_note(int index) {
     const char *category = genisys_preset_category(index);
     if (category == NULL) return 60;
     if (category[0] == 'B' && category[1] == 'a') return 40;  /* Bass: E2 */
@@ -25,7 +25,7 @@ static int preset_loudness_note(int index) {
     return 60;
 }
 
-static double preset_loudness_db(GenisysEngine *e, int index) {
+static inline double preset_loudness_db(GenisysEngine *e, int index) {
     enum { RATE = 48000, FRAMES = RATE * 8 / 10, WINDOW = RATE / 20 };
     static float left[FRAMES], right[FRAMES];
     GenisysPatch patch = genisys_preset_patch(index);
