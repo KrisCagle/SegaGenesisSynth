@@ -10,7 +10,9 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_events/juce_events.h>
 
+#include "Arpeggiator.h"
 #include "PluginProcessor.h"
+#include "UndoHistory.h"
 #include "genisys_presets.h"
 
 namespace
@@ -265,6 +267,380 @@ namespace
         check (p->getActiveVoices() == 0, "drum machine mode: no FM synth voice plays for drum notes");
     }
 
+    void sendCc (GenisysProcessor& p, int cc, int value)
+    {
+        juce::AudioBuffer<float> buffer (2, kBlock);
+        juce::MidiBuffer midi;
+        midi.addEvent (juce::MidiMessage::controllerEvent (1, cc, value), 0);
+        process (p, buffer, midi);
+    }
+
+    void testMidiLearn()
+    {
+        auto p = makeProcessor();
+        auto& map = p->midiMap;
+        map.clear();
+
+        map.startLearning ("macro_bright");
+        sendCc (*p, 20, 127);
+        check (map.ccFor ("macro_bright") == 20, "midi learn: moving a knob links its CC to the waiting control");
+        check (map.learningParamId().isEmpty(), "midi learn: learning stops after one knob");
+
+        sendCc (*p, 20, 0);
+        check (intParam (*p, "macro_bright") == -100, "midi learn: CC 0 = the control's minimum");
+        sendCc (*p, 20, 127);
+        check (intParam (*p, "macro_bright") == 100, "midi learn: CC 127 = the control's maximum");
+
+        map.assign (21, "reverb_mix", 0.0f, 0.5f);
+        sendCc (*p, 21, 127);
+        check (intParam (*p, "reverb_mix") == 50, "midi learn: a range limits how far the knob goes");
+        map.assign (22, "echo_mix", 1.0f, 0.0f);
+        sendCc (*p, 22, 0);
+        check (intParam (*p, "echo_mix") == 100, "midi learn: MIN above MAX turns the knob around");
+
+        map.assign (30, "feedback");
+        map.assign (31, "feedback");
+        check (map.ccFor ("feedback") == 31, "midi learn: relearning a control moves it to the new CC");
+        sendCc (*p, 30, 127);
+        check (intParam (*p, "feedback") != 7, "midi learn: the old CC no longer moves it");
+
+        map.startLearning ("glide_time");
+        sendCc (*p, 64, 127);
+        check (map.ccFor ("glide_time") < 0, "midi learn: the sustain pedal is never learned");
+        map.stopLearning();
+    }
+
+    void testMidiLearnPickup()
+    {
+        auto p = makeProcessor();
+        auto& map = p->midiMap;
+        map.clear();
+        map.setPickup (true);
+        map.assign (40, "macro_attack");
+        // macro_attack sits at 0 (the middle). A knob turned all the way up
+        // shouldn't make it jump...
+        sendCc (*p, 40, 127);
+        check (intParam (*p, "macro_attack") == 0, "pickup: a far-away knob doesn't make the control jump");
+        // ...until it comes back past the current value.
+        sendCc (*p, 40, 64);
+        sendCc (*p, 40, 0);
+        check (intParam (*p, "macro_attack") == -100, "pickup: after catching up, the knob takes over");
+    }
+
+    void testMidiMapSavedWithProject()
+    {
+        auto p = makeProcessor();
+        p->midiMap.clear();
+        p->midiMap.assign (55, "psg_level", 0.25f, 0.75f);
+        p->midiMap.setPickup (true);
+        juce::MemoryBlock saved;
+        p->getStateInformation (saved);
+
+        auto q = makeProcessor();
+        q->midiMap.loadLayout (genisys::MidiMap::Layout::generic);
+        q->setStateInformation (saved.getData(), (int) saved.getSize());
+        const auto maps = q->midiMap.getMappings();
+        check (maps.size() == 1 && maps[0].cc == 55 && maps[0].paramId == "psg_level", "midi map: links are restored with the project");
+        check (maps.size() == 1 && std::abs (maps[0].min - 0.25f) < 1.0e-4f && std::abs (maps[0].max - 0.75f) < 1.0e-4f,
+               "midi map: ranges are restored with the project");
+        check (q->midiMap.pickupEnabled(), "midi map: the pickup setting is restored");
+
+        // A second save must not stack up old copies of the map.
+        juce::MemoryBlock again;
+        q->getStateInformation (again);
+        auto xml = juce::AudioProcessor::getXmlFromBinary (again.getData(), (int) again.getSize());
+        int mapCount = 0;
+        if (xml != nullptr)
+            for (auto* child : xml->getChildIterator())
+                mapCount += child->hasTagName ("MIDIMAP") ? 1 : 0;
+        check (mapCount == 1, "midi map: saved once per project, never duplicated");
+
+        // Projects from before MIDI Learn keep the user's default map.
+        auto r = makeProcessor();
+        r->midiMap.loadLayout (genisys::MidiMap::Layout::generic);
+        juce::ValueTree old = r->state.copyState();
+        juce::MemoryBlock oldBlock;
+        if (auto oldXml = old.createXml())
+            juce::AudioProcessor::copyXmlToBinary (*oldXml, oldBlock);
+        r->setStateInformation (oldBlock.getData(), (int) oldBlock.getSize());
+        check (r->midiMap.ccFor ("macro_bright") == 74, "midi map: an older project keeps the default links");
+    }
+
+    void testControllerLayouts()
+    {
+        auto p = makeProcessor();
+        auto& map = p->midiMap;
+        using Layout = genisys::MidiMap::Layout;
+
+        map.loadLayout (Layout::generic);
+        check (map.getMappings().size() == 12 && map.ccFor ("macro_bright") == 74 && map.ccFor ("macro_attack") == 73,
+               "layouts: generic uses the MIDI standard's sound-control CCs");
+        map.loadLayout (Layout::arturiaMiniLab);
+        check (map.getMappings().size() == 12 && map.ccFor ("macro_bright") == 74 && map.ccFor ("reverb_mix") == 16
+                   && map.ccFor ("master_gain") == 82,
+               "layouts: Arturia MiniLab knobs and faders");
+        map.loadLayout (Layout::akaiMpkMini);
+        check (map.getMappings().size() == 8 && map.ccFor ("macro_bright") == 70 && map.ccFor ("reverb_mix") == 77,
+               "layouts: Akai MPK Mini knobs");
+        map.loadLayout (Layout::novationLaunchkey);
+        check (map.getMappings().size() == 8 && map.ccFor ("macro_bright") == 21 && map.ccFor ("reverb_mix") == 28,
+               "layouts: Novation Launchkey pots");
+
+        // A volume fader at the top means normal volume (0 dB), not +12 dB.
+        map.loadLayout (Layout::arturiaMiniLab);
+        sendCc (*p, 82, 127);
+        check (std::abs (p->state.getRawParameterValue ("master_gain")->load()) < 0.05f, "layouts: volume fader tops out at 0 dB");
+    }
+
+    void testPresetButtons()
+    {
+        auto p = makeProcessor();
+        auto& map = p->midiMap;
+        map.clear();
+        const int last = p->getNumPrograms() - 1;
+
+        map.startLearning (genisys::MidiMap::nextPresetId);
+        sendCc (*p, 60, 127);
+        check (map.ccFor (genisys::MidiMap::nextPresetId) == 60, "preset buttons: a pad can be learned as Next Preset");
+        map.assign (61, genisys::MidiMap::previousPresetId);
+
+        p->setCurrentProgram (5);
+        sendCc (*p, 60, 127); // press
+        sendCc (*p, 60, 0);   // release: no second step
+        p->applyPendingPresetChanges();
+        check (p->getCurrentProgram() == 6, "preset buttons: one press steps one preset forward");
+
+        p->setCurrentProgram (0);
+        sendCc (*p, 61, 127);
+        p->applyPendingPresetChanges();
+        check (p->getCurrentProgram() == last, "preset buttons: Previous wraps around to the last preset");
+
+        p->stepPreset (1);
+        check (p->getCurrentProgram() == 0, "preset buttons: Next wraps around to the first preset");
+
+        juce::AudioBuffer<float> buffer (2, kBlock);
+        juce::MidiBuffer midi;
+        midi.addEvent (juce::MidiMessage::programChange (1, 10), 0);
+        process (*p, buffer, midi);
+        p->applyPendingPresetChanges();
+        check (p->getCurrentProgram() == 10, "program change: picks the preset by number");
+
+        // The preset links survive a save and reload.
+        juce::MemoryBlock saved;
+        p->getStateInformation (saved);
+        auto q = makeProcessor();
+        q->setStateInformation (saved.getData(), (int) saved.getSize());
+        check (q->midiMap.ccFor (genisys::MidiMap::previousPresetId) == 61, "preset buttons: links are saved with the project");
+    }
+
+    void testUserPresets()
+    {
+        auto p = makeProcessor();
+        const auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                             .getChildFile ("genisys_preset_test_" + juce::String (juce::Random::getSystemRandom().nextInt (1000000)));
+        p->presetLibrary = genisys::PresetLibrary (dir);
+
+        p->setCurrentProgram (10);
+        setIntParam (*p, "feedback", 6);
+        setIntParam (*p, "reverb_mix", 42);
+        setIntParam (*p, "psg_level", 9);
+        setIntParam (*p, "octave", 2);
+        const auto file = p->presetLibrary.save (p->state, "My Sound", "Leads");
+        check (file.existsAsFile() && file.getParentDirectory().getFileName() == "Leads", "user presets: saved into a category folder");
+        const auto list = p->presetLibrary.scan();
+        check (list.size() == 1 && list[0].name == "My Sound" && list[0].category == "Leads", "user presets: the library lists it");
+
+        p->setCurrentProgram (1);
+        setIntParam (*p, "octave", 0);
+        check (p->loadUserPreset (file), "user presets: loads back");
+        check (intParam (*p, "feedback") == 6 && intParam (*p, "reverb_mix") == 42 && intParam (*p, "psg_level") == 9,
+               "user presets: FM, effects and PSG settings come back");
+        check (intParam (*p, "octave") == 0, "user presets: player settings (octave) are left alone");
+        const auto info = p->getCurrentPresetInfo();
+        check (info.user && info.name == "My Sound" && info.category == "Leads", "user presets: the cartridge shows the user preset");
+
+        p->presetLibrary.setFavorite (info.favoriteKey, true);
+        p->presetLibrary.setFavorite (genisys::PresetLibrary::factoryKey ("Slap Bass"), true);
+        check (p->presetLibrary.isFavorite (info.favoriteKey) && p->presetLibrary.favorites().size() == 2,
+               "favourites: user and factory presets can be starred");
+        p->presetLibrary.setFavorite (info.favoriteKey, false);
+        check (! p->presetLibrary.isFavorite (info.favoriteKey), "favourites: and unstarred");
+
+        juce::MemoryBlock saved;
+        p->getStateInformation (saved);
+        auto q = makeProcessor();
+        q->setStateInformation (saved.getData(), (int) saved.getSize());
+        check (q->getCurrentPresetInfo().user && q->getCurrentPresetInfo().name == "My Sound",
+               "user presets: the project remembers which one was loaded");
+
+        p->setCurrentProgram (3);
+        check (! p->getCurrentPresetInfo().user, "user presets: picking a factory preset switches back");
+
+        const auto bogus = dir.getChildFile ("bogus.genisyspreset");
+        bogus.replaceWithText ("<nope/>");
+        check (! p->loadUserPreset (bogus), "user presets: a file that isn't a preset is refused");
+        dir.deleteRecursively();
+    }
+
+    // Runs the arpeggiator over `total` samples in blocks; returns the
+    // note-ons (note, absolute sample) and note-offs it produced.
+    struct ArpEvent { int note, sample; bool on; };
+    std::vector<ArpEvent> runArp (genisys::Arpeggiator& arp, const genisys::Arpeggiator::Settings& s, juce::MidiBuffer first,
+                                  int total, int block = 1000, std::function<void (juce::MidiBuffer&, int)> inject = {})
+    {
+        std::vector<ArpEvent> out;
+        for (int start = 0; start < total; start += block)
+        {
+            juce::MidiBuffer midi;
+            if (start == 0)
+                midi = first;
+            if (inject)
+                inject (midi, start);
+            arp.process (midi, block, s, 120.0, [] (const juce::MidiMessage& m) { return m.getChannel() == 10; });
+            for (const auto m : midi)
+            {
+                const auto msg = m.getMessage();
+                if (msg.isNoteOn()) out.push_back ({ msg.getNoteNumber(), start + m.samplePosition, true });
+                else if (msg.isNoteOff()) out.push_back ({ msg.getNoteNumber(), start + m.samplePosition, false });
+            }
+        }
+        return out;
+    }
+
+    std::vector<int> noteOns (const std::vector<ArpEvent>& events)
+    {
+        std::vector<int> notes;
+        for (const auto& e : events)
+            if (e.on)
+                notes.push_back (e.note);
+        return notes;
+    }
+
+    void testArpeggiator()
+    {
+        using Mode = genisys::Arpeggiator::Mode;
+        genisys::Arpeggiator::Settings s;
+        s.on = true;
+        s.beatsPerStep = 0.25; // 1/16 at 120 BPM, 48 kHz = 6000 samples
+        s.gate = 0.5f;
+        juce::MidiBuffer chord;
+        chord.addEvent (juce::MidiMessage::noteOn (1, 64, (juce::uint8) 100), 0);
+        chord.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+        chord.addEvent (juce::MidiMessage::noteOn (1, 67, (juce::uint8) 100), 0);
+
+        genisys::Arpeggiator arp;
+        arp.prepare (kRate);
+        auto events = runArp (arp, s, chord, 24000);
+        check (noteOns (events) == std::vector<int> { 60, 64, 67, 60 }, "arp: UP plays the chord low to high, then repeats");
+        bool timed = true;
+        int onCount = 0;
+        for (const auto& e : events)
+        {
+            if (e.on && e.sample != 6000 * onCount++) timed = false;
+            if (! e.on && e.sample % 6000 != 3000) timed = false;
+        }
+        check (timed, "arp: steps land exactly on 1/16 notes, and a 50% gate ends each note halfway");
+
+        s.mode = Mode::down;
+        arp.prepare (kRate);
+        check (noteOns (runArp (arp, s, chord, 18000)) == std::vector<int> { 67, 64, 60 }, "arp: DOWN plays high to low");
+
+        s.mode = Mode::upDown;
+        arp.prepare (kRate);
+        check (noteOns (runArp (arp, s, chord, 36000)) == std::vector<int> { 60, 64, 67, 64, 60, 64 },
+               "arp: UP-DOWN bounces without repeating the ends");
+
+        s.mode = Mode::asPlayed;
+        arp.prepare (kRate);
+        check (noteOns (runArp (arp, s, chord, 18000)) == std::vector<int> { 64, 60, 67 }, "arp: AS PLAYED keeps the order keys went down");
+
+        s.mode = Mode::up;
+        s.octaves = 2;
+        arp.prepare (kRate);
+        check (noteOns (runArp (arp, s, chord, 36000)) == std::vector<int> { 60, 64, 67, 72, 76, 79 }, "arp: 2 octaves climbs an octave higher");
+        s.octaves = 1;
+
+        // Letting go stops the pattern (and its last note).
+        arp.prepare (kRate);
+        events = runArp (arp, s, chord, 30000, 1000, [] (juce::MidiBuffer& m, int start)
+        {
+            if (start == 9000)
+                for (int n : { 60, 64, 67 })
+                    m.addEvent (juce::MidiMessage::noteOff (1, n), 0);
+        });
+        check (noteOns (events).size() == 2 && ! events.back().on, "arp: letting go of the keys stops it");
+
+        // Latch keeps going after the keys are let go.
+        s.latch = true;
+        arp.prepare (kRate);
+        events = runArp (arp, s, chord, 30000, 1000, [] (juce::MidiBuffer& m, int start)
+        {
+            if (start == 9000)
+                for (int n : { 60, 64, 67 })
+                    m.addEvent (juce::MidiMessage::noteOff (1, n), 0);
+        });
+        check (noteOns (events).size() == 5, "arp: LATCH keeps playing after the keys are let go");
+        s.latch = false;
+
+        // Drum-kit notes pass straight through.
+        arp.prepare (kRate);
+        juce::MidiBuffer drum;
+        drum.addEvent (juce::MidiMessage::noteOn (10, 36, (juce::uint8) 100), 100);
+        events = runArp (arp, s, drum, 12000);
+        check (events.size() == 1 && events[0].note == 36 && events[0].sample == 100, "arp: drum notes skip the arpeggiator");
+    }
+
+    void testUndoHistory()
+    {
+        auto p = makeProcessor();
+        genisys::UndoHistory history (*p);
+        const int start = intParam (*p, "feedback");
+        const auto settle = [&] { for (int i = 0; i <= genisys::UndoHistory::settlePolls; ++i) history.poll(); };
+
+        check (! history.canUndo(), "undo: nothing to undo at first");
+        setIntParam (*p, "feedback", 5);
+        settle();
+        setIntParam (*p, "feedback", 2);
+        settle();
+        check (history.undo() && intParam (*p, "feedback") == 5, "undo: steps back one change");
+        check (history.undo() && intParam (*p, "feedback") == start, "undo: and another");
+        check (! history.undo(), "undo: stops at the beginning");
+        check (history.redo() && intParam (*p, "feedback") == 5, "redo: puts a change back");
+
+        // A change still settling is undone too.
+        setIntParam (*p, "algorithm", 6);
+        history.poll();
+        check (history.undo() && intParam (*p, "algorithm") != 6, "undo: works straight after a change");
+        check (! history.canRedo() || history.redo(), "redo: available after undo");
+
+        // A whole preset load is one step.
+        settle();
+        const int before = intParam (*p, "algorithm");
+        p->setCurrentProgram (20);
+        settle();
+        check (history.undo() && intParam (*p, "algorithm") == before, "undo: a preset load is one step");
+    }
+
+    void testExpressionParameters()
+    {
+        auto p = makeProcessor();
+        int tine = -1;
+        for (int i = 0; i < p->getNumPrograms(); ++i)
+            if (p->getProgramName (i) == "Tine E.Piano")
+                tine = i;
+        p->setCurrentProgram (tine);
+        check (intParam (*p, "velocity_tone") == 60, "expression: presets set velocity-to-tone");
+        check (intParam (*p, "aftertouch_vibrato") == 40, "expression: aftertouch vibrato is on by default");
+
+        // Channel pressure reaches the engine without upsetting anything.
+        juce::AudioBuffer<float> buffer (2, kBlock);
+        juce::MidiBuffer midi;
+        midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+        midi.addEvent (juce::MidiMessage::channelPressureChange (1, 127), 100);
+        process (*p, buffer, midi);
+        check (peak (buffer, 0, kBlock) > 0.01f, "expression: notes play with aftertouch");
+    }
+
     void testSustainPedal()
     {
         auto p = makeProcessor();
@@ -470,6 +846,15 @@ int main()
     testPresetLoadsLayersAndEffects();
     testDrumsOnChannel10();
     testDrumMachineMode();
+    testMidiLearn();
+    testMidiLearnPickup();
+    testMidiMapSavedWithProject();
+    testControllerLayouts();
+    testPresetButtons();
+    testUserPresets();
+    testArpeggiator();
+    testUndoHistory();
+    testExpressionParameters();
     testSustainPedal();
     testOctaveShiftReleasesCorrectNote();
     testEffectsOffIsUntouched();

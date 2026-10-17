@@ -22,15 +22,17 @@ namespace genisys::ui
         explicit PresetCartridge (GenisysProcessor&);
         void paint (juce::Graphics&) override;
         void mouseDown (const juce::MouseEvent&) override;
-        void refresh();
+        void refresh(bool force = false);
+        std::function<void()> onSaveRequested; // "Save current sound as a preset..."
 
     private:
-        juce::Rectangle<float> leftArrow() const, rightArrow() const, label() const;
+        juce::Rectangle<float> leftArrow() const, rightArrow() const, label() const, star() const;
         void step (int delta);
+        void showMenu();
         GenisysProcessor& processor;
-        juce::String category, name;
-        int shownProgram = -1;
-        juce::uint32 lastStateHash = 0;
+        juce::String category, name, favoriteKey;
+        bool favorite = false;
+        juce::uint32 shownChange = 0xffffffff;
     };
 
     // Round, controller-style buttons (A / B / C).

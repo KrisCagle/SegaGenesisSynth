@@ -24,8 +24,10 @@ GenisysProcessor::GenisysProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       state (*this, nullptr, "GenisysState", genisys::params::createLayout()),
       engine ((ensureEngineGlobalsInitialised(), std::make_unique<GenisysEngine>())),
-      params (state)
+      params (state),
+      midiMap (*this)
 {
+    midiMap.loadDefault();
     genisys_engine_init (engine.get(), 44100.0);
     for (auto& channel : playedNote)
         channel.fill (-1);
@@ -33,7 +35,10 @@ GenisysProcessor::GenisysProcessor()
     scratchRight.resize (kScratchFrames);
 }
 
-GenisysProcessor::~GenisysProcessor() = default;
+GenisysProcessor::~GenisysProcessor()
+{
+    cancelPendingUpdate();
+}
 
 void GenisysProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
@@ -43,6 +48,7 @@ void GenisysProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     forceParameterSync = true;
 
     editorMidi.reset (sampleRate);
+    arp.prepare (sampleRate);
     effects.prepare (sampleRate, samplesPerBlock, getTotalNumOutputChannels());
     masterGain.reset (sampleRate, 0.02);
     masterGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (params.masterGainDb()));
@@ -93,6 +99,18 @@ void GenisysProcessor::syncParametersToEngine()
 
 void GenisysProcessor::handleMidi (const juce::MidiMessage& message)
 {
+    // Mapped (or being learned) knobs and faders go to their parameter
+    // instead of their usual job (e.g. CC 1 = mod wheel vibrato).
+    if (message.isController() && midiMap.handleController (message.getControllerNumber(), message.getControllerValue()))
+        return;
+
+    // Program Change picks a preset by number (applied on the message thread).
+    if (message.isProgramChange())
+    {
+        pendingProgram = message.getProgramChangeNumber();
+        return;
+    }
+
     // General MIDI convention: channel 10 is drums. Drum hits are one-shots,
     // so their note-offs are ignored. With drums off, channel 10 plays FM.
     // Only notes go to the kit: controllers still reach the synth.
@@ -124,8 +142,15 @@ void GenisysProcessor::handleMidi (const juce::MidiMessage& message)
         genisys_engine_sustain (engine.get(), message.isSustainPedalOn() ? 1 : 0);
         return;
     }
+    if (message.isChannelPressure() || message.isAftertouch())
+    {
+        const int value = message.isChannelPressure() ? message.getChannelPressureValue() : message.getAfterTouchValue();
+        genisys_engine_aftertouch (engine.get(), value / 127.0);
+        return;
+    }
     if (message.isResetAllControllers())
     {
+        genisys_engine_aftertouch (engine.get(), 0.0);
         genisys_engine_pitch_bend (engine.get(), 0.0);
         genisys_engine_mod_wheel (engine.get(), 0.0);
         genisys_engine_sustain (engine.get(), 0);
@@ -201,6 +226,16 @@ void GenisysProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
     syncParametersToEngine();
     masterGain.setTargetValue (juce::Decibels::decibelsToGain (params.masterGainDb()));
 
+    if (auto* host = getPlayHead())
+        if (auto hostPosition = host->getPosition())
+            if (auto bpm = hostPosition->getBpm())
+                hostBpm = *bpm;
+
+    // The arpeggiator rewrites the notes; drum-kit notes pass through.
+    arp.process (midi, buffer.getNumSamples(), params.readArp(), hostBpm,
+                 [this] (const juce::MidiMessage& m)
+                 { return lastDrums.enabled && (m.getChannel() == 10 || drumsFromAllChannels); });
+
     // Render up to each MIDI event's exact sample position, so note timing
     // is sample-accurate no matter how large the host's buffer is.
     const int numSamples = buffer.getNumSamples();
@@ -216,11 +251,10 @@ void GenisysProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
 
     render (buffer, position, numSamples - position);
 
+    if (midiMap.hasPendingPresetSteps() || pendingProgram.load() >= 0)
+        triggerAsyncUpdate();
+
     // Effects, then Master Volume (ramped per sample to avoid clicks).
-    if (auto* host = getPlayHead())
-        if (auto hostPosition = host->getPosition())
-            if (auto bpm = hostPosition->getBpm())
-                hostBpm = *bpm;
     effects.process (buffer, params.readEffects(), hostBpm);
 
     const int outputs = juce::jmin (2, buffer.getNumChannels());
@@ -285,7 +319,46 @@ void GenisysProcessor::setCurrentProgram (int index)
         return;
 
     currentProgram = index;
+    userPresetName.clear();
+    userPresetCategory.clear();
+    userPresetFile = juce::File();
+    ++presetChanges;
     genisys::params::applyPreset (state, index);
+}
+
+void GenisysProcessor::stepPreset (int delta)
+{
+    const int n = getNumPrograms();
+    if (n > 0 && delta != 0)
+        setCurrentProgram (((currentProgram + delta) % n + n) % n);
+}
+
+bool GenisysProcessor::loadUserPreset (const juce::File& file)
+{
+    const auto loaded = genisys::PresetLibrary::load (state, file);
+    if (loaded.name.isEmpty())
+        return false;
+    userPresetName = loaded.name;
+    userPresetCategory = loaded.category;
+    userPresetFile = file;
+    ++presetChanges;
+    return true;
+}
+
+GenisysProcessor::PresetInfo GenisysProcessor::getCurrentPresetInfo() const
+{
+    if (userPresetName.isNotEmpty())
+        return { userPresetCategory, userPresetName, presetLibrary.userKey (userPresetFile), true };
+    const juce::String name (genisys_preset_name (currentProgram));
+    return { juce::String (genisys_preset_category (currentProgram)), name, genisys::PresetLibrary::factoryKey (name), false };
+}
+
+void GenisysProcessor::applyPendingPresetChanges()
+{
+    const int program = pendingProgram.exchange (-1);
+    if (program >= 0)
+        setCurrentProgram (program);
+    stepPreset (midiMap.takePresetSteps());
 }
 
 const juce::String GenisysProcessor::getProgramName (int index)
@@ -326,6 +399,13 @@ void GenisysProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto copy = state.copyState();
     copy.setProperty ("program", currentProgram, nullptr);
+    if (userPresetName.isNotEmpty())
+    {
+        copy.setProperty ("userPresetName", userPresetName, nullptr);
+        copy.setProperty ("userPresetCategory", userPresetCategory, nullptr);
+        copy.setProperty ("userPresetFile", userPresetFile.getFullPathName(), nullptr);
+    }
+    copy.appendChild (midiMap.toValueTree(), nullptr);
     if (auto xml = copy.createXml())
         copyXmlToBinary (*xml, destData);
 }
@@ -338,6 +418,17 @@ void GenisysProcessor::setStateInformation (const void* data, int sizeInBytes)
         {
             auto restored = juce::ValueTree::fromXml (*xml);
             currentProgram = restored.getProperty ("program", 0);
+            userPresetName = restored.getProperty ("userPresetName").toString();
+            userPresetCategory = restored.getProperty ("userPresetCategory").toString();
+            userPresetFile = juce::File (restored.getProperty ("userPresetFile").toString());
+            ++presetChanges;
+            // Projects from before MIDI Learn have no map: keep the default.
+            const auto map = restored.getChildWithName (genisys::MidiMap::treeType);
+            if (map.isValid())
+            {
+                midiMap.fromValueTree (map);
+                restored.removeChild (map, nullptr);
+            }
             state.replaceState (restored);
         }
     }

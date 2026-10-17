@@ -142,10 +142,75 @@ static GenisysPatchResult import_dmp(const uint8_t *d, size_t size, GenisysPatch
     return GENISYS_PATCH_OK;
 }
 
+/* Furnace instrument: "FINS", format version (2 bytes), instrument type
+ * (2), then feature blocks -- a 2-letter code, a 2-byte length, the data --
+ * until "EN". The FM block holds a flags byte (operator count in bits 0-3),
+ * 3 bytes of base data (4 from format version 224), then 8 bytes per
+ * operator in register order:
+ *   DT(6-4) MULT(3-0) | TL(6-0) | RS(7-6) AR(4-0) | AM(7) DR(4-0) |
+ *   D2R(4-0) | SL(7-4) RR(3-0) | SSG(3-0) | (OPM/OPL-only fields)
+ * Detune is 0-7 with 3 = none, as in the other formats. */
+static unsigned read_u16le(const uint8_t *b) { return (unsigned)b[0] | ((unsigned)b[1] << 8); }
+
+static GenisysPatchResult import_fui(const uint8_t *d, size_t size, GenisysPatch *p) {
+    static const char old_magic[] = "-Furnace instr.-";
+    GenisysPatch out = *p;
+    unsigned version;
+    size_t pos = 8;
+
+    if (size >= 16 && memcmp(d, old_magic, 16) == 0) return GENISYS_PATCH_OLD_FURNACE;
+    if (size < 8) return GENISYS_PATCH_TRUNCATED;
+    if (memcmp(d, "FINS", 4) != 0) return GENISYS_PATCH_UNKNOWN_FORMAT;
+    version = read_u16le(d + 4);
+
+    while (pos + 4 <= size) {
+        const uint8_t *code = d + pos;
+        size_t len = read_u16le(d + pos + 2);
+        pos += 4;
+        if (code[0] == 'E' && code[1] == 'N') return GENISYS_PATCH_NOT_FM; /* e.g. a PSG or sample instrument */
+        if (pos + len > size) return GENISYS_PATCH_TRUNCATED;
+        if (code[0] == 'F' && code[1] == 'M') {
+            const uint8_t *b = d + pos;
+            const size_t base = version >= 224 ? 4 : 3;
+            int i;
+            if (len < 1 + base) return GENISYS_PATCH_TRUNCATED;
+            if ((b[0] & 0x0F) != 4) return GENISYS_PATCH_NOT_FM; /* 2-op (OPL/OPLL) instrument */
+            if (len < 1 + base + 4 * 8) return GENISYS_PATCH_TRUNCATED;
+            out.algorithm = (b[1] >> 4) & 7;
+            out.feedback = b[1] & 7;
+            out.pms = b[2] & 7;
+            out.ams = (b[2] >> 3) & 3;
+            for (i = 0; i < 4; i++) {
+                const uint8_t *o = b + 1 + base + i * 8;
+                FileOp f;
+                f.dt_file = (o[0] >> 4) & 7;
+                f.mul = o[0] & 15;
+                f.tl = o[1] & 127;
+                f.ks = (o[2] >> 6) & 3;
+                f.ar = o[2] & 31;
+                f.am = (o[3] >> 7) & 1;
+                f.d1r = o[3] & 31;
+                f.d2r = o[4] & 31;
+                f.sl = (o[5] >> 4) & 15;
+                f.rr = o[5] & 15;
+                f.ssg = o[6] & 15;
+                store_op(&out, i, &f);
+            }
+            out.lfo_enable = (out.pms > 0 || out.ams > 0) ? 1 : p->lfo_enable;
+            *p = out;
+            return GENISYS_PATCH_OK;
+        }
+        pos += len;
+    }
+    /* Ran out of data: a cut-off block header, or no FM block at all. */
+    return pos < size ? GENISYS_PATCH_TRUNCATED : GENISYS_PATCH_NOT_FM;
+}
+
 GenisysPatchResult genisys_patch_import(const uint8_t *data, size_t size, const char *filename, GenisysPatch *patch) {
     if (has_extension(filename, ".tfi")) return import_tfi(data, size, patch);
     if (has_extension(filename, ".vgi")) return import_vgi(data, size, patch);
     if (has_extension(filename, ".dmp")) return import_dmp(data, size, patch);
+    if (has_extension(filename, ".fui")) return import_fui(data, size, patch);
     return GENISYS_PATCH_UNKNOWN_FORMAT;
 }
 
@@ -173,9 +238,10 @@ size_t genisys_patch_export_tfi(const GenisysPatch *p, uint8_t out[GENISYS_TFI_S
 const char *genisys_patch_result_text(GenisysPatchResult result) {
     switch (result) {
         case GENISYS_PATCH_OK: return "OK";
-        case GENISYS_PATCH_UNKNOWN_FORMAT: return "Not a supported patch file (.tfi, .vgi or .dmp).";
+        case GENISYS_PATCH_UNKNOWN_FORMAT: return "Not a supported patch file (.tfi, .vgi, .dmp or .fui).";
         case GENISYS_PATCH_TRUNCATED: return "The file is shorter than its format requires.";
-        case GENISYS_PATCH_NOT_FM: return "This DefleMask preset isn't a Genesis FM instrument.";
+        case GENISYS_PATCH_NOT_FM: return "This isn't a 4-operator FM instrument (Genesis / YM2612).";
+        case GENISYS_PATCH_OLD_FURNACE: return "This is Furnace's old instrument format. Open it in a recent Furnace and save it again.";
         default: return "Unknown error.";
     }
 }

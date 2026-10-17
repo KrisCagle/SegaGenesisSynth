@@ -7,8 +7,9 @@
  *   .tfi  TFM Music Maker (42 bytes)
  *   .vgi  VGM Music Maker (43 bytes: TFI + LFO sensitivity + AM bits)
  *   .dmp  DefleMask preset (FM instruments, file versions 9-11)
+ *   .fui  Furnace instrument (the "FINS" format Furnace has saved since 2023)
  *
- * Layouts as read by the Furnace tracker's importers. All three list the
+ * Layouts as read by the Furnace tracker's importers. All four list the
  * operators in the chip's register order (OP1, OP3, OP2, OP4) and store
  * detune as 0-6 with 3 meaning "no detune". */
 
@@ -25,7 +26,8 @@ typedef enum {
     GENISYS_PATCH_OK = 0,
     GENISYS_PATCH_UNKNOWN_FORMAT, /* not a .tfi / .vgi / .dmp */
     GENISYS_PATCH_TRUNCATED,      /* file too short for its format */
-    GENISYS_PATCH_NOT_FM          /* a DefleMask preset for another chip / a non-FM instrument */
+    GENISYS_PATCH_NOT_FM,         /* a DefleMask preset for another chip / a non-FM instrument */
+    GENISYS_PATCH_OLD_FURNACE     /* a Furnace instrument in its pre-2023 format */
 } GenisysPatchResult;
 
 /* Decodes `data` into `patch`. The format comes from `filename`'s

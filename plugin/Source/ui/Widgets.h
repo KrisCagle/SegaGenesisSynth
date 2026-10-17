@@ -15,6 +15,26 @@ namespace genisys::ui
     void setHelp (juce::Component&, const juce::String& title, const juce::String& text);
     juce::String getHelp (const juce::Component&); // searches up the parent chain
 
+    // Controls bound to a parameter are "mappable": MIDI Learn can link a
+    // hardware knob to them, and right-clicking one opens its MIDI menu.
+    void markMappable (juce::Component&, const juce::RangedAudioParameter&);
+    juce::String getMappableParamId (const juce::Component&); // searches up the parent chain
+
+    // Implemented by the editor: the right-click menu of a mappable control.
+    class ParameterMenuHandler
+    {
+    public:
+        virtual ~ParameterMenuHandler() = default;
+        virtual void showParameterMenu (juce::Component& source, juce::RangedAudioParameter&) = 0;
+        // MIDI menu for something that isn't a parameter (e.g. the preset
+        // arrows); `actionId` is a MidiMap target such as nextPresetId.
+        virtual void showActionMenu (juce::Component& source, const juce::String& actionId) = 0;
+    };
+
+    // Opens `source`'s parameter menu if `e` is a right-click (or Ctrl-click
+    // on a Mac). Returns true if it did, so the click does nothing else.
+    bool handleParameterMenuClick (juce::Component& source, juce::RangedAudioParameter&, const juce::MouseEvent& e);
+
     // A blue, beveled window like a 16-bit game menu, with a yellow title.
     class MenuWindow : public juce::Component
     {
@@ -68,7 +88,7 @@ namespace genisys::ui
         Formatter formatter;
         float value = 0.0f;          // denormalised parameter value
         float dragStartPos = 0.0f;
-        bool hovering = false;
+        bool dragging = false;
     };
 
     // A row of options, one lit (e.g. POLY / MONO / LEGATO).
@@ -115,11 +135,12 @@ namespace genisys::ui
         void mouseDown (const juce::MouseEvent&) override;
         void mouseUp (const juce::MouseEvent&) override;
         void setText (const juce::String& t) { text = t; repaint(); }
+        void setLit (bool shouldBeLit) { if (lit != shouldBeLit) { lit = shouldBeLit; repaint(); } }
         std::function<void()> onClick;
 
     private:
         juce::String text;
-        bool pressed = false;
+        bool pressed = false, lit = false;
     };
 
     // The game-style text box: types out help text, with a blinking arrow.

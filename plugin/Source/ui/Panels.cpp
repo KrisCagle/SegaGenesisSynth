@@ -38,38 +38,98 @@ void Logo::paint (juce::Graphics& g)
 // ---------------------------------------------------------------------------
 PresetCartridge::PresetCartridge (GenisysProcessor& p) : processor (p)
 {
-    setHelp (*this, "PRESET CARTRIDGE", "Choose a sound. Click the arrows to step through presets, or click the label for the full list by category.");
+    setHelp (*this, "PRESET CARTRIDGE",
+             "Choose a sound. Click the arrows (or press the LEFT and RIGHT arrow keys) to step through presets, or click the label "
+             "for the full list. Right-click an arrow to step presets from a pad or button on your MIDI keyboard.");
     refresh();
 }
 
 juce::Rectangle<float> PresetCartridge::leftArrow() const { return { 6.0f, 0.0f, 26.0f, (float) getHeight() }; }
 juce::Rectangle<float> PresetCartridge::rightArrow() const { return { (float) getWidth() - 32.0f, 0.0f, 26.0f, (float) getHeight() }; }
 juce::Rectangle<float> PresetCartridge::label() const { return getLocalBounds().toFloat().reduced (36.0f, 7.0f); }
-
-void PresetCartridge::refresh()
+juce::Rectangle<float> PresetCartridge::star() const
 {
-    const int program = processor.getCurrentProgram();
-    if (program == shownProgram)
+    const auto l = label();
+    return { l.getRight() - 26.0f, l.getY() + 3.0f, 22.0f, 18.0f };
+}
+
+void PresetCartridge::refresh (bool force)
+{
+    if (! force && processor.getPresetChangeCount() == shownChange)
         return;
-    shownProgram = program;
-    category = juce::String (genisys_preset_category (program)).toUpperCase();
-    name = processor.getProgramName (program).toUpperCase();
+    shownChange = processor.getPresetChangeCount();
+    const auto info = processor.getCurrentPresetInfo();
+    category = (info.user ? "USER: " + info.category : info.category).toUpperCase();
+    name = info.name.toUpperCase();
+    favoriteKey = info.favoriteKey;
+    favorite = processor.presetLibrary.isFavorite (favoriteKey);
     repaint();
 }
 
 void PresetCartridge::step (int delta)
 {
-    const int n = processor.getNumPrograms();
-    processor.setCurrentProgram ((processor.getCurrentProgram() + delta + n) % n);
+    processor.stepPreset (delta);
     refresh();
 }
 
 void PresetCartridge::mouseDown (const juce::MouseEvent& e)
 {
+    if (e.mods.isPopupMenu())
+    {
+        if (leftArrow().contains (e.position) || rightArrow().contains (e.position))
+            if (auto* handler = findParentComponentOfClass<ParameterMenuHandler>())
+                handler->showActionMenu (*this, leftArrow().contains (e.position) ? MidiMap::previousPresetId : MidiMap::nextPresetId);
+        return;
+    }
     if (leftArrow().contains (e.position)) { step (-1); return; }
     if (rightArrow().contains (e.position)) { step (1); return; }
+    if (star().contains (e.position))
+    {
+        processor.presetLibrary.setFavorite (favoriteKey, ! favorite);
+        refresh (true);
+        return;
+    }
+    showMenu();
+}
+
+void PresetCartridge::showMenu()
+{
+    // Item IDs: factory presets 1..N, user presets from kUserBase,
+    // favourites from kFavoriteBase, then commands.
+    static constexpr int kUserBase = 10000, kFavoriteBase = 20000, kToggleFavorite = 30000, kSave = 30001, kOpenFolder = 30002;
+    const auto userPresets = processor.presetLibrary.scan();
+    const auto favorites = processor.presetLibrary.favorites();
+    const int current = processor.getCurrentProgram();
+    const auto info = processor.getCurrentPresetInfo();
 
     juce::PopupMenu menu;
+
+    // Favourites first: quickest to reach.
+    juce::PopupMenu favoritesMenu;
+    juce::StringArray favoriteKeys;
+    for (const auto& key : favorites)
+    {
+        if (key.startsWith ("factory:"))
+        {
+            const auto presetName = key.fromFirstOccurrenceOf ("factory:", false, false);
+            for (int i = 0; i < processor.getNumPrograms(); ++i)
+                if (processor.getProgramName (i) == presetName)
+                {
+                    favoritesMenu.addItem (kFavoriteBase + favoriteKeys.size(), presetName, true, key == info.favoriteKey);
+                    favoriteKeys.add (key);
+                }
+        }
+        else if (processor.presetLibrary.fileForUserKey (key).existsAsFile())
+        {
+            favoritesMenu.addItem (kFavoriteBase + favoriteKeys.size(),
+                                   processor.presetLibrary.fileForUserKey (key).getFileNameWithoutExtension() + " (user)", true,
+                                   key == info.favoriteKey);
+            favoriteKeys.add (key);
+        }
+    }
+    menu.addSubMenu (juce::String::charToString (0x2605) + " Favorites", favoritesMenu, favoriteKeys.size() > 0);
+    menu.addSeparator();
+
     juce::String currentCategory;
     juce::PopupMenu sub;
     const auto flush = [&]
@@ -86,17 +146,71 @@ void PresetCartridge::mouseDown (const juce::MouseEvent& e)
             flush();
             currentCategory = cat;
         }
-        sub.addItem (i + 1, processor.getProgramName (i), true, i == processor.getCurrentProgram());
+        const auto presetName = processor.getProgramName (i);
+        const bool isFav = favorites.contains (PresetLibrary::factoryKey (presetName));
+        sub.addItem (i + 1, isFav ? presetName + "  " + juce::String::charToString (0x2605) : presetName, true,
+                     ! info.user && i == current);
     }
     flush();
+
+    menu.addSeparator();
+    juce::PopupMenu userMenu, userSub;
+    juce::String userCategory;
+    for (size_t i = 0; i < userPresets.size(); ++i)
+    {
+        const auto& u = userPresets[i];
+        if (u.category != userCategory)
+        {
+            if (userCategory.isNotEmpty())
+                userMenu.addSubMenu (userCategory, userSub);
+            userSub = juce::PopupMenu();
+            userCategory = u.category;
+        }
+        userSub.addItem (kUserBase + (int) i, u.name, true, info.user && u.file == processor.presetLibrary.fileForUserKey (info.favoriteKey));
+    }
+    if (userCategory.isNotEmpty())
+        userMenu.addSubMenu (userCategory, userSub);
+    menu.addSubMenu ("My Presets", userMenu, ! userPresets.empty());
+
+    menu.addSeparator();
+    menu.addItem (kToggleFavorite, favorite ? "Remove from Favorites" : "Add to Favorites");
+    menu.addItem (kSave, "Save current sound as a preset...");
+    menu.addItem (kOpenFolder, "Show my presets folder");
+
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this),
-                        [this] (int result)
+                        [this, userPresets, favoriteKeys] (int result)
                         {
-                            if (result > 0)
-                            {
+                            if (result <= 0)
+                                return;
+                            if (result < kUserBase)
                                 processor.setCurrentProgram (result - 1);
-                                refresh();
+                            else if (result < kFavoriteBase)
+                                processor.loadUserPreset (userPresets[(size_t) (result - kUserBase)].file);
+                            else if (result < kToggleFavorite)
+                            {
+                                const auto key = favoriteKeys[result - kFavoriteBase];
+                                if (key.startsWith ("factory:"))
+                                {
+                                    for (int i = 0; i < processor.getNumPrograms(); ++i)
+                                        if (PresetLibrary::factoryKey (processor.getProgramName (i)) == key)
+                                            processor.setCurrentProgram (i);
+                                }
+                                else
+                                {
+                                    processor.loadUserPreset (processor.presetLibrary.fileForUserKey (key));
+                                }
                             }
+                            else if (result == kToggleFavorite)
+                                processor.presetLibrary.setFavorite (favoriteKey, ! favorite);
+                            else if (result == kSave && onSaveRequested)
+                                onSaveRequested();
+                            else if (result == kOpenFolder)
+                            {
+                                const auto dir = processor.presetLibrary.presetsDirectory();
+                                dir.createDirectory();
+                                dir.startAsProcess();
+                            }
+                            refresh (true);
                         });
 }
 
@@ -120,6 +234,12 @@ void PresetCartridge::paint (juce::Graphics& g)
     PixelFont::drawIn (g, category, l.withHeight (l.getHeight() * 0.45f).withTrimmedTop (5.0f), 1.0f, theme::yellow,
                        juce::Justification::centred, false);
     PixelFont::drawIn (g, name, l.withTrimmedTop (l.getHeight() * 0.42f), 2.0f, theme::text, juce::Justification::centred);
+
+    // Favourite star: lit when this preset is a favourite.
+    const auto mouseOverStar = isMouseOver() && star().contains (getMouseXYRelative().toFloat());
+    PixelFont::drawIn (g, juce::String::charToString (0x2605), star(), 1.6f,
+                       favorite ? theme::yellow : (mouseOverStar ? theme::text : theme::textDim),
+                       juce::Justification::centred, favorite);
 
     const auto mouse = getMouseXYRelative().toFloat();
     PixelFont::drawIn (g, juce::String::charToString (0x25C0), leftArrow(), 2.0f,
@@ -180,6 +300,7 @@ AlgorithmPicker::AlgorithmPicker (juce::RangedAudioParameter& p)
     : param (p), attachment (p, [this] (float v) { selected = juce::jlimit (0, 7, (int) std::lround (v)); repaint(); })
 {
     attachment.sendInitialUpdate();
+    markMappable (*this, p);
 }
 
 juce::String AlgorithmPicker::describe (int a)
@@ -280,6 +401,8 @@ void AlgorithmPicker::mouseMove (const juce::MouseEvent& e)
 
 void AlgorithmPicker::mouseDown (const juce::MouseEvent& e)
 {
+    if (handleParameterMenuClick (*this, param, e))
+        return;
     for (int a = 0; a < 8; ++a)
         if (cell (a).contains (e.position))
             attachment.setValueAsCompleteGesture ((float) a);

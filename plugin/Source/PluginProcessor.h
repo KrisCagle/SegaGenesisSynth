@@ -7,7 +7,9 @@
 #include <juce_audio_devices/juce_audio_devices.h> // MidiMessageCollector
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include "MidiMap.h"
 #include "Parameters.h"
+#include "PresetLibrary.h"
 
 // The Genisys plugin: wraps one GenisysEngine and connects it to the host's
 // MIDI, parameters, sample rate and saved state.
@@ -17,7 +19,8 @@
 //    engine is touched after prepareToPlay.
 //  - The UI and host automation change parameters on other threads; those
 //    land in APVTS's atomics, which processBlock reads once per block.
-class GenisysProcessor final : public juce::AudioProcessor
+class GenisysProcessor final : public juce::AudioProcessor,
+                               private juce::AsyncUpdater
 {
 public:
     GenisysProcessor();
@@ -43,6 +46,31 @@ public:
     int getCurrentProgram() override { return currentProgram; }
     void setCurrentProgram (int index) override;
     const juce::String getProgramName (int index) override;
+
+    // Moves `delta` presets along, wrapping around. Message thread.
+    void stepPreset (int delta);
+
+    // The user's own presets and favourites (files in Genisys's folder).
+    genisys::PresetLibrary presetLibrary;
+
+    // Loads a .genisyspreset file. Returns false if it isn't one.
+    bool loadUserPreset (const juce::File&);
+
+    // What the cartridge shows: a factory preset or a user preset.
+    struct PresetInfo
+    {
+        juce::String category, name;
+        juce::String favoriteKey; // see PresetLibrary
+        bool user = false;
+    };
+    PresetInfo getCurrentPresetInfo() const;
+    // Goes up whenever a different preset is loaded (message thread).
+    juce::uint32 getPresetChangeCount() const { return presetChanges; }
+
+    // Preset changes asked for from the audio thread (mapped preset
+    // buttons, MIDI program changes) are applied here, on the message
+    // thread. Runs by itself; public so tests can run it directly.
+    void applyPendingPresetChanges();
     void changeProgramName (int, const juce::String&) override {}
 
     // ---- Telemetry for the editor (written on the audio thread, read on the
@@ -73,7 +101,12 @@ public:
     // Thread-safe: the editor adds, processBlock drains.
     juce::MidiMessageCollector editorMidi;
 
+    // MIDI Learn: hardware knobs (CCs) linked to parameters. Saved with the
+    // project; a new Genisys starts from the user's default map.
+    genisys::MidiMap midiMap;
+
 private:
+    void handleAsyncUpdate() override { applyPendingPresetChanges(); }
     void syncParametersToEngine();
     void handleMidi (const juce::MidiMessage& message);
     void render (juce::AudioBuffer<float>& buffer, int start, int count);
@@ -90,12 +123,17 @@ private:
     bool forceParameterSync = true;
 
     genisys::Effects effects;
+    genisys::Arpeggiator arp;
     double hostBpm = 120.0;
 
     juce::SmoothedValue<float> masterGain; // ramps volume changes to avoid clicks
     std::vector<float> scratchLeft, scratchRight;
 
     int currentProgram = 0;
+    juce::String userPresetName, userPresetCategory; // empty = a factory preset is showing
+    juce::File userPresetFile;
+    juce::uint32 presetChanges = 0;
+    std::atomic<int> pendingProgram { -1 }; // from a MIDI program change
 
     std::atomic<uint8_t> activeVoices { 0 };
     static constexpr int kScopeSize = 4096;

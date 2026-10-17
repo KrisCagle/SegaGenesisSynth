@@ -87,7 +87,7 @@ endif()
 
 # ---- Tools -------------------------------------------------------------------
 if(GENISYS_BUILD_TOOLS)
-    foreach(tool_name genisys_render preset_levels)
+    foreach(tool_name genisys_render preset_levels preset_similarity)
         add_executable(${tool_name} tools/${tool_name}.c)
         target_link_libraries(${tool_name} PRIVATE genisys_engine)
         genisys_set_warnings(${tool_name})

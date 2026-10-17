@@ -98,6 +98,7 @@ GenisysPatch genisys_default_patch(void) {
     p.lfo_rate = 3;
     p.velocity_sens = 50;
     p.vibrato_depth = 50;
+    p.aftertouch_vibrato = 40; /* press harder for vibrato: what most players expect */
     p.vibrato_rate = 55;
     p.voice_mode = GENISYS_MODE_POLY;
     p.glide_time = 0;
@@ -146,7 +147,16 @@ static int voice_tl(const GenisysEngine *e, int voice, int op) {
     if (!(genisys_carrier_mask(p->algorithm) & (1 << op))) {
         /* BRIGHT: modulators only, so it changes tone, not volume. A silent
          * (127) modulator stays silent. */
-        if (tl < 127) tl = clamp_int(tl - macro_steps(p->macro_bright, 40), 0, 126);
+        if (tl < 127) {
+            int vel = e->voice[voice].velocity;
+            if (vel < 1) vel = 127;
+            tl -= macro_steps(p->macro_bright, 40);
+            /* Velocity -> tone: the volume curve, applied to the modulators. */
+            tl += (int)(g_velocity_att[vel] * (float)p->velocity_bright / 100.0f + 0.5f);
+            /* Aftertouch -> brightness: up to 24 steps (18 dB) more modulation. */
+            tl -= (int)(e->aftertouch * p->aftertouch_bright / 100.0 * 24.0 + 0.5);
+            tl = clamp_int(tl, 0, 126);
+        }
     } else {
         int vel = e->voice[voice].velocity;
         if (vel < 1) vel = 127;
@@ -222,6 +232,8 @@ double engine_pitch_offset(const GenisysEngine *e) {
     double amount = e->patch.vibrato_amount / 100.0;
     double vibrato = 0.0;
     if (e->mod_wheel > amount) amount = e->mod_wheel;
+    amount += e->aftertouch * e->patch.aftertouch_vibrato / 100.0;
+    if (amount > 1.0) amount = 1.0;
     if (amount > 0.0 && e->patch.vibrato_depth > 0) {
         vibrato = amount * e->patch.vibrato_depth / 100.0 * sin(2.0 * 3.14159265358979323846 * e->vibrato_phase);
     }
@@ -625,6 +637,19 @@ void genisys_engine_pitch_bend(GenisysEngine *e, double semitones) {
 
 void genisys_engine_mod_wheel(GenisysEngine *e, double amount) {
     e->mod_wheel = amount < 0.0 ? 0.0 : (amount > 1.0 ? 1.0 : amount);
+}
+
+void genisys_engine_aftertouch(GenisysEngine *e, double amount) {
+    int v;
+    amount = amount < 0.0 ? 0.0 : (amount > 1.0 ? 1.0 : amount);
+    if (amount == e->aftertouch) return;
+    e->aftertouch = amount;
+    /* Brightness lives in each voice's modulator levels: rewrite them. */
+    if (e->patch.aftertouch_bright > 0) {
+        for (v = 0; v < GENISYS_NUM_VOICES; v++) {
+            if (e->voice[v].state != GENISYS_VOICE_FREE) write_voice_tl(e, v);
+        }
+    }
 }
 
 void genisys_engine_sustain(GenisysEngine *e, int down) {

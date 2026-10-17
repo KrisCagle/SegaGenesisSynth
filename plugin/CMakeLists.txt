@@ -38,13 +38,18 @@ juce_add_plugin(Genisys
 # target that links them, so they can't share one static library.)
 add_library(GenisysSharedCode INTERFACE)
 target_sources(GenisysSharedCode INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/Arpeggiator.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Effects.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/MidiMap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Parameters.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/PluginEditor.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/PluginProcessor.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/PresetLibrary.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/UndoHistory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/ui/PixelFont.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/ui/Widgets.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/ui/Panels.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/ui/Panels.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/ui/MidiPanels.cpp)
 target_include_directories(GenisysSharedCode INTERFACE Source)
 target_compile_definitions(GenisysSharedCode INTERFACE
     JUCE_WEB_BROWSER=0          # no embedded browser needed

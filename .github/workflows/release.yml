@@ -30,6 +30,7 @@ jobs:
           - name: Linux
             os: ubuntu-latest
             targets: Genisys_VST3 Genisys_Standalone
+            build_jobs: 2 # see ci.yml: more can run the runner out of memory
 
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +48,7 @@ jobs:
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DGENISYS_BUILD_TESTS=OFF -DGENISYS_BUILD_TOOLS=OFF ${{ matrix.cmake_extra }}
 
       - name: Build
-        run: cmake --build build --config Release --parallel --target ${{ matrix.targets }}
+        run: cmake --build build --config Release --parallel ${{ matrix.build_jobs }} --target ${{ matrix.targets }}
 
       - name: Package
         shell: bash
