@@ -93,11 +93,16 @@ The installer puts the VST3, the Audio Unit and the Standalone app in the right 
   - **PSG:** the square-wave layer and arpeggio.
   - **DRUMS:** the drum kit.
   - **FX:** chorus, echo and reverb.
-  - **MOD:** LFO, vibrato and pitch bend.
+  - **MOD:** LFO, vibrato, pitch bend, touch response (velocity and aftertouch) and window size.
+  - **ARP:** the FM arpeggiator.
   - **MIDI:** your MIDI keyboard's knob links (MIDI Learn).
 - **Quick Sound:**
   - BRIGHT, ATTACK, DECAY and RELEASE reshape any preset without needing to know FM.
   - Setting them back to 0 returns the preset to how it was made.
+- **Arpeggiator (ARP tab):** switch it on and hold a chord. Pick the order (up, down, up-down, random, as played), the speed (1/4 to 1/32, following your song's tempo), octaves, gate and latch.
+- **Touch (MOD tab):** **VEL TONE** makes soft notes darker, like a real FM keyboard. **AT VIB** and **AT TONE** add vibrato or brightness when you press harder on a held key (if your keyboard has aftertouch).
+- **Undo / Redo:** the buttons at the top right, or **Ctrl+Z / Ctrl+Shift+Z** (**Cmd** on a Mac).
+- **Window size:** 75% to 150% on the MOD tab, or drag the corner. Genisys remembers it.
 - **Playing without a MIDI keyboard:**
   - Click the on-screen piano, or play **A W S E D F T G Y H U J K** on your computer keyboard.
   - **Z / X** shift the octave.
@@ -115,7 +120,7 @@ The installer puts the VST3, the Audio Unit and the Standalone app in the right 
   - **Pickup** stops sounds jumping when a hardware knob is somewhere else: the knob takes over once it reaches the current setting.
   - Links are saved with your project. **Set as default** makes every new Genisys start with them. **Save map / Load map** share them as a file.
 - **Patches:**
-  - **A** loads a Genisys preset file, or imports community Genesis patches (`.tfi`, `.vgi`, `.dmp`).
+  - **A** loads a Genisys preset file, or imports community Genesis patches (`.tfi`, `.vgi`, `.dmp`, and Furnace `.fui`).
   - **B** saves your sound as one of your presets, or exports its FM part as `.tfi`.
   - **C** flips between two versions of a sound so you can compare edits.
 
@@ -154,7 +159,8 @@ The installer puts the VST3, the Audio Unit and the Standalone app in the right 
 - **Playing:** velocity, pitch bend, mod-wheel vibrato and sustain pedal; Poly, Mono and Legato modes with glide; stereo Unison; an Octave shift.
 - **MIDI Learn:** link any hardware knob or fader to any control, with ranges, pickup, and ready-made layouts for popular keyboards.
 - **Effects:** chorus, echo (tempo-synced, ping-pong) and reverb.
-- **Patch files:** load community Genesis patches (`.tfi`, `.vgi`, `.dmp`) and save your sounds as `.tfi`.
+- **Patch files:** load community Genesis patches (`.tfi`, `.vgi`, `.dmp`, Furnace `.fui`) and save your sounds as `.tfi`.
+- **Arpeggiator, touch response, undo/redo, user presets and favourites.**
 - **Demo renderer** (`tools/genisys_render`): writes demo WAVs, so you can hear the engine without a DAW.
 - **Desktop app** (`desktop/`, Windows): the original raylib prototype, kept for reference. The plugin's Standalone app replaces it.
 - **Nintendo DS port** (`nds/`): proof that the core runs on real, constrained hardware.

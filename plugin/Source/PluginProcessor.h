@@ -123,6 +123,7 @@ private:
     bool forceParameterSync = true;
 
     genisys::Effects effects;
+    genisys::Arpeggiator arp;
     double hostBpm = 120.0;
 
     juce::SmoothedValue<float> masterGain; // ramps volume changes to avoid clicks

@@ -35,6 +35,7 @@ typedef struct {
     int lfo, lfo_rate, ams, pms;   /* chip LFO: on/off, rate 0-7, tremolo, vibrato */
     OpDef op[4];
     int vel;                       /* velocity sensitivity %; 0 = engine default */
+    int vtone;                     /* velocity -> tone %: softer notes darker (pianos, plucks, brass) */
     int no_vel;                    /* 1 = ignore velocity (organs) */
     int mode, glide, unison, detune, center; /* center: keep unison copies un-panned */
     int psg_mode, psg_level, psg_octave, psg_arp_speed;
@@ -53,14 +54,14 @@ static const PresetDef PRESETS[] = {
               O(1, 4, 30, 31, 10, 0, 4, 8, 0), O(1, 4, 5, 31, 10, 0, 4, 8, 0) } },
 
     /* ===== Bass ===== */
-    { .category = "Bass", .name = "Slap Bass", .level = 3, .alg = 4, .fb = 4, .vel = 70,
+    { .category = "Bass", .name = "Slap Bass", .vtone = 40, .level = 3, .alg = 4, .fb = 4, .vel = 70,
       .op = { O(1, 0, 14, 31, 16, 0, 11, 10, 1), O(1, 0, 6, 31, 12, 2, 7, 9, 1),
               O(3, 0, 22, 31, 15, 0, 12, 10, 1), O(1, 0, 4, 31, 6, 2, 3, 9, 1) } },
     /* A round body plus a sub-octave, its tone fading slowly: "boing". */
     { .category = "Bass", .name = "Rubber Bass", .alg = 4, .fb = 2, .vel = 60, .mode = LEGATO, .glide = 50,
       .op = { O(1, 0, 30, 31, 6, 0, 7, 10, 0), O(1, 0, 4, 31, 3, 1, 3, 10, 0),
               O(1, 0, 46, 31, 8, 0, 8, 10, 0), O(0, 0, 10, 31, 2, 1, 2, 10, 0) } },
-    { .category = "Bass", .name = "Finger Bass", .level = 2, .alg = 2, .fb = 3, .vel = 60,
+    { .category = "Bass", .name = "Finger Bass", .vtone = 30, .level = 2, .alg = 2, .fb = 3, .vel = 60,
       .op = { O(1, 0, 38, 31, 8, 0, 4, 9, 0), O(2, 0, 44, 31, 10, 0, 6, 9, 0),
               O(1, 0, 30, 31, 12, 0, 7, 9, 0), O(1, 0, 3, 30, 5, 2, 3, 9, 1) } },
     { .category = "Bass", .name = "Fretless Bass", .level = -4, .alg = 2, .fb = 1, .mode = LEGATO, .glide = 120,
@@ -140,18 +141,18 @@ static const PresetDef PRESETS[] = {
               O(1, 0, 28, 31, 3, 0, 2, 9, 0), O(1, 0, 4, 31, 1, 0, 1, 9, 0) } },
 
     /* ===== Keys ===== */
-    { .category = "Keys", .name = "Tine E.Piano", .level = 1, .alg = 4, .fb = 0, .vel = 70, .chorus = 30,
+    { .category = "Keys", .name = "Tine E.Piano", .vtone = 60, .level = 1, .alg = 4, .fb = 0, .vel = 70, .chorus = 30,
       .op = { O(14, 0, 40, 31, 20, 0, 15, 9, 2), O(1, 0, 6, 31, 7, 2, 4, 7, 2),
               O(1, 0, 32, 31, 9, 0, 6, 8, 1), O(1, 1, 6, 31, 5, 2, 3, 7, 1) } },
     /* Warm, round and touch-sensitive: play harder for more bark. */
-    { .category = "Keys", .name = "Soft E.Piano", .level = 1, .alg = 4, .fb = 0, .vel = 90, .chorus = 35,
+    { .category = "Keys", .name = "Soft E.Piano", .vtone = 70, .level = 1, .alg = 4, .fb = 0, .vel = 90, .chorus = 35,
       .op = { O(1, 0, 40, 31, 10, 0, 8, 7, 1), O(1, 0, 6, 31, 5, 2, 4, 6, 1),
               O(1, 0, 52, 31, 12, 0, 10, 7, 1), O(1, 3, 10, 31, 5, 2, 4, 6, 1) } },
     /* Hammer modulator into three detuned "strings" that decay at different speeds. */
-    { .category = "Keys", .name = "FM Piano", .level = 1, .alg = 5, .fb = 4, .vel = 75,
+    { .category = "Keys", .name = "FM Piano", .vtone = 50, .level = 1, .alg = 5, .fb = 4, .vel = 75,
       .op = { O(1, 0, 32, 31, 16, 0, 12, 8, 2), O(1, 1, 8, 31, 6, 3, 5, 7, 2),
               O(1, 5, 10, 31, 7, 3, 6, 7, 2), O(2, 0, 20, 31, 9, 4, 8, 7, 2) } },
-    { .category = "Keys", .name = "Clav", .level = -4, .alg = 4, .fb = 3, .vel = 70,
+    { .category = "Keys", .name = "Clav", .vtone = 40, .level = -4, .alg = 4, .fb = 3, .vel = 70,
       .op = { O(5, 0, 22, 31, 14, 0, 8, 10, 2), O(1, 0, 6, 31, 10, 3, 6, 11, 2),
               O(1, 0, 26, 31, 14, 0, 8, 10, 0), O(2, 0, 14, 31, 10, 0, 6, 11, 2) } },
     { .category = "Keys", .name = "Harpsichord", .level = -2, .alg = 2, .fb = 4,
@@ -161,7 +162,7 @@ static const PresetDef PRESETS[] = {
     { .category = "Keys", .name = "Toy Piano", .level = -1, .alg = 4, .fb = 0,
       .op = { O(13, 3, 36, 31, 18, 0, 15, 9, 2), O(1, 0, 4, 31, 9, 0, 15, 9, 2),
               O(7, 0, 44, 31, 20, 0, 15, 9, 2), O(4, 7, 18, 31, 14, 0, 15, 9, 2) } },
-    { .category = "Keys", .name = "Honky Piano", .level = 1, .alg = 4, .fb = 1, .vel = 70,
+    { .category = "Keys", .name = "Honky Piano", .vtone = 40, .level = 1, .alg = 4, .fb = 1, .vel = 70,
       .op = { O(1, 0, 28, 31, 12, 0, 8, 8, 2), O(1, 2, 6, 31, 7, 3, 5, 7, 2),
               O(1, 0, 30, 31, 12, 0, 8, 8, 2), O(1, 6, 6, 31, 7, 3, 5, 7, 2) } },
     { .category = "Keys", .name = "Glass Keys", .level = -3, .alg = 5, .fb = 0, .reverb = 30, .reverb_size = 60,
@@ -191,10 +192,10 @@ static const PresetDef PRESETS[] = {
               O(1, 0, 36, 28, 0, 0, 0, 11, 0), O(2, 1, 14, 28, 0, 0, 0, 11, 0) } },
 
     /* ===== Bells & Mallets ===== */
-    { .category = "Bells & Mallets", .name = "Marimba", .level = -2, .alg = 4, .fb = 0, .vel = 70,
+    { .category = "Bells & Mallets", .name = "Marimba", .vtone = 40, .level = -2, .alg = 4, .fb = 0, .vel = 70,
       .op = { O(4, 0, 34, 31, 22, 0, 15, 10, 2), O(1, 0, 6, 31, 12, 0, 15, 10, 2),
               O(10, 0, 46, 31, 24, 0, 15, 10, 2), O(1, 0, 14, 31, 14, 0, 15, 10, 2) } },
-    { .category = "Bells & Mallets", .name = "Vibraphone", .level = -4, .alg = 4, .fb = 0, .lfo = 1, .lfo_rate = 3, .ams = 2,
+    { .category = "Bells & Mallets", .name = "Vibraphone", .vtone = 30, .level = -4, .alg = 4, .fb = 0, .lfo = 1, .lfo_rate = 3, .ams = 2,
       .reverb = 25, .reverb_size = 55,
       .op = { O(4, 0, 40, 31, 14, 0, 15, 8, 1), OA(1, 0, 6, 31, 5, 0, 15, 6, 1),
               O(1, 0, 44, 31, 10, 0, 15, 6, 0), OA(4, 0, 26, 31, 8, 0, 15, 6, 1) } },
@@ -225,15 +226,15 @@ static const PresetDef PRESETS[] = {
               O(7, 7, 22, 31, 5, 0, 15, 3, 2), O(9, 2, 26, 31, 7, 0, 15, 3, 2) } },
 
     /* ===== Brass & Winds ===== */
-    { .category = "Brass & Winds", .name = "Brass Section", .level = 3, .alg = 4, .fb = 5, .unison = 2, .detune = 6,
+    { .category = "Brass & Winds", .name = "Brass Section", .vtone = 40, .level = 3, .alg = 4, .fb = 5, .unison = 2, .detune = 6,
       .reverb = 15, .reverb_size = 50,
       .op = { O(1, 0, 24, 21, 6, 0, 3, 9, 0), O(1, 0, 6, 25, 3, 1, 2, 9, 0),
               O(1, 0, 28, 20, 6, 0, 3, 9, 0), O(1, 1, 8, 25, 3, 1, 2, 9, 0) } },
-    { .category = "Brass & Winds", .name = "Synth Brass", .level = -4, .alg = 4, .fb = 6, .unison = 2, .detune = 12, .chorus = 30,
+    { .category = "Brass & Winds", .name = "Synth Brass", .vtone = 30, .level = -4, .alg = 4, .fb = 6, .unison = 2, .detune = 12, .chorus = 30,
       .op = { O(1, 0, 22, 19, 8, 0, 4, 9, 0), O(1, 0, 6, 27, 2, 0, 1, 9, 0),
               O(2, 0, 34, 18, 8, 0, 5, 9, 0), O(1, 7, 10, 27, 2, 0, 1, 9, 0) } },
     /* Short and punchy: for hits and stabs on the beat. */
-    { .category = "Brass & Winds", .name = "Brass Stab", .level = -1, .alg = 4, .fb = 6, .unison = 2, .detune = 8, .vel = 60,
+    { .category = "Brass & Winds", .name = "Brass Stab", .vtone = 50, .level = -1, .alg = 4, .fb = 6, .unison = 2, .detune = 8, .vel = 60,
       .reverb = 20, .reverb_size = 55,
       .op = { O(1, 0, 20, 31, 12, 0, 6, 9, 0), O(1, 1, 4, 31, 9, 4, 6, 8, 0),
               O(2, 0, 30, 31, 14, 0, 8, 9, 0), O(1, 5, 8, 31, 9, 4, 6, 8, 0) } },
@@ -244,12 +245,12 @@ static const PresetDef PRESETS[] = {
               O(2, 0, 46, 14, 0, 0, 0, 8, 0), O(1, 0, 4, 18, 0, 0, 0, 8, 0) } },
     /* Brightness rises with the slower-attacking modulators, as a real
      * trumpet's does. */
-    { .category = "Brass & Winds", .name = "Trumpet", .level = 2, .alg = 3, .fb = 5, .mode = LEGATO, .glide = 20,
+    { .category = "Brass & Winds", .name = "Trumpet", .vtone = 40, .level = 2, .alg = 3, .fb = 5, .mode = LEGATO, .glide = 20,
       .lfo = 1, .lfo_rate = 3, .pms = 1,
       .op = { O(1, 0, 26, 19, 6, 0, 3, 9, 0), O(1, 0, 32, 18, 6, 0, 3, 9, 0),
               O(1, 0, 40, 22, 4, 0, 2, 9, 0), O(1, 0, 4, 26, 2, 0, 1, 9, 0) } },
     /* Gritty feedback through a chain, with a growl on the attack. */
-    { .category = "Brass & Winds", .name = "Sax", .level = -3, .alg = 0, .fb = 5, .mode = LEGATO, .glide = 30,
+    { .category = "Brass & Winds", .name = "Sax", .vtone = 40, .level = -3, .alg = 0, .fb = 5, .mode = LEGATO, .glide = 30,
       .lfo = 1, .lfo_rate = 3, .pms = 2, .vel = 70, .reverb = 20, .reverb_size = 50,
       .op = { O(1, 0, 34, 24, 8, 0, 6, 9, 0), O(1, 0, 34, 26, 4, 0, 3, 9, 0),
               O(3, 0, 40, 26, 6, 0, 4, 9, 0), O(1, 0, 4, 26, 1, 0, 1, 9, 0) } },
@@ -325,33 +326,33 @@ static const PresetDef PRESETS[] = {
       .op = { O(1, 0, 22, 31, 1, 0, 1, 8, 0), O(3, 0, 34, 31, 2, 0, 2, 8, 0),
               O(1, 0, 22, 31, 2, 0, 1, 8, 0), O(1, 0, 2, 31, 1, 1, 1, 8, 0) } },
     /* Warm pair plus a soft partial; a slow natural fade. */
-    { .category = "Guitar", .name = "Clean Guitar", .level = -2, .alg = 3, .fb = 3, .vel = 70, .chorus = 30,
+    { .category = "Guitar", .name = "Clean Guitar", .vtone = 40, .level = -2, .alg = 3, .fb = 3, .vel = 70, .chorus = 30,
       .op = { O(2, 0, 40, 31, 14, 0, 10, 9, 1), O(1, 3, 36, 31, 10, 0, 8, 9, 1),
               O(3, 0, 46, 31, 16, 0, 12, 9, 1), O(1, 0, 4, 31, 6, 1, 6, 8, 1) } },
-    { .category = "Guitar", .name = "Nylon Guitar", .level = -4, .alg = 2, .fb = 0, .vel = 70, .reverb = 20, .reverb_size = 50,
+    { .category = "Guitar", .name = "Nylon Guitar", .vtone = 40, .level = -4, .alg = 2, .fb = 0, .vel = 70, .reverb = 20, .reverb_size = 50,
       .op = { O(1, 0, 46, 31, 12, 0, 10, 8, 1), O(3, 0, 40, 31, 18, 0, 15, 8, 1),
               O(1, 0, 30, 31, 16, 0, 12, 8, 1), O(1, 0, 4, 31, 9, 2, 10, 7, 1) } },
     { .category = "Guitar", .name = "Muted Guitar", .level = -3, .alg = 4, .fb = 3,
       .op = { O(1, 0, 28, 31, 20, 0, 15, 12, 0), O(1, 0, 6, 31, 16, 0, 15, 12, 1),
               O(2, 0, 34, 31, 22, 0, 15, 12, 0), O(1, 0, 10, 31, 16, 0, 15, 12, 0) } },
     /* Choppy and bright with feedback bite: for rhythm parts. */
-    { .category = "Guitar", .name = "Funk Guitar", .alg = 0, .fb = 5, .vel = 60, .chorus = 25,
+    { .category = "Guitar", .name = "Funk Guitar", .vtone = 40, .alg = 0, .fb = 5, .vel = 60, .chorus = 25,
       .op = { O(3, 0, 34, 31, 18, 0, 12, 11, 1), O(1, 0, 30, 31, 16, 0, 10, 11, 1),
               O(2, 0, 34, 31, 12, 0, 8, 11, 1), O(1, 0, 4, 31, 12, 4, 10, 12, 1) } },
 
     /* ===== Plucks ===== */
     /* Soft, long-ringing pluck with a gentle octave. */
-    { .category = "Plucks", .name = "Harp", .level = -2, .alg = 6, .fb = 0, .vel = 70, .reverb = 30, .reverb_size = 65,
+    { .category = "Plucks", .name = "Harp", .vtone = 40, .level = -2, .alg = 6, .fb = 0, .vel = 70, .reverb = 30, .reverb_size = 65,
       .op = { O(1, 0, 32, 31, 14, 0, 15, 6, 2), O(1, 0, 6, 31, 5, 0, 15, 5, 2),
               O(2, 0, 16, 31, 7, 0, 15, 5, 2), O(4, 2, 28, 31, 9, 0, 15, 5, 2) } },
     /* Two modulators twang into one chain: a sharp, buzzy pluck. */
-    { .category = "Plucks", .name = "Koto", .level = 5, .alg = 1, .fb = 6, .reverb = 20, .reverb_size = 50,
+    { .category = "Plucks", .name = "Koto", .vtone = 30, .level = 5, .alg = 1, .fb = 6, .reverb = 20, .reverb_size = 50,
       .op = { O(1, 0, 26, 31, 20, 0, 15, 10, 3), O(5, 0, 30, 31, 24, 0, 15, 10, 3),
               O(2, 0, 24, 31, 16, 0, 12, 10, 2), O(1, 0, 0, 31, 7, 0, 15, 9, 2) } },
-    { .category = "Plucks", .name = "Pizzicato", .level = -2, .alg = 2, .fb = 2, .reverb = 25, .reverb_size = 60,
+    { .category = "Plucks", .name = "Pizzicato", .vtone = 30, .level = -2, .alg = 2, .fb = 2, .reverb = 25, .reverb_size = 60,
       .op = { O(1, 0, 34, 31, 14, 0, 10, 10, 0), O(2, 0, 38, 31, 14, 0, 10, 10, 0),
               O(1, 0, 28, 31, 14, 0, 10, 10, 0), O(1, 0, 4, 31, 12, 0, 15, 10, 2) } },
-    { .category = "Plucks", .name = "Banjo", .level = -5, .alg = 4, .fb = 4,
+    { .category = "Plucks", .name = "Banjo", .vtone = 30, .level = -5, .alg = 4, .fb = 4,
       .op = { O(5, 0, 24, 31, 16, 0, 10, 9, 2), O(1, 0, 6, 31, 10, 0, 15, 9, 2),
               O(2, 0, 30, 31, 16, 0, 12, 9, 0), O(3, 0, 18, 31, 12, 0, 15, 9, 2) } },
     { .category = "Plucks", .name = "Kalimba", .level = -4, .alg = 4, .fb = 0, .echo = 15, .echo_fb = 25, .echo_div = D8DOT,
@@ -475,6 +476,7 @@ GenisysPatch genisys_preset_patch(int index) {
     p.lfo_rate = d->lfo ? d->lfo_rate : 3;
     p.ams = d->ams;
     p.pms = d->pms;
+    p.velocity_bright = d->vtone;
     if (d->no_vel) p.velocity_sens = 0;
     else if (d->vel > 0) p.velocity_sens = d->vel;
     p.voice_mode = d->mode;

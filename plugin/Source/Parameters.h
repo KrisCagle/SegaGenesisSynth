@@ -5,6 +5,7 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include "Arpeggiator.h"
 #include "Effects.h"
 #include "genisys_engine.h" // C header with its own extern "C" guards
 
@@ -37,6 +38,7 @@ namespace genisys::params
         // that always send channel 1.
         bool drumsFromAllChannels() const { return std::lround (drumInput->load (std::memory_order_relaxed)) == 1; }
         EffectSettings readEffects() const;
+        Arpeggiator::Settings readArp() const;
         float masterGainDb() const { return masterGain->load(); }
         int octave() const { return (int) std::lround (octaveShift->load (std::memory_order_relaxed)); }
         int bendRange() const { return (int) std::lround (bendRangeSemis->load (std::memory_order_relaxed)); }
@@ -72,6 +74,9 @@ namespace genisys::params
         std::atomic<float>* psgDecay; std::atomic<float>* psgSustain; std::atomic<float>* psgRelease;
         std::atomic<float>* psgArpSpeed; std::atomic<float>* drumsOn; std::atomic<float>* drumLevel;
         std::atomic<float>* drumInput;
+        std::atomic<float>* velocityTone; std::atomic<float>* aftertouchVibrato; std::atomic<float>* aftertouchBright;
+        std::atomic<float>* arpOn; std::atomic<float>* arpMode; std::atomic<float>* arpRate;
+        std::atomic<float>* arpOctaves; std::atomic<float>* arpGate; std::atomic<float>* arpLatch;
         std::array<OpParams, 4> ops;
     };
 

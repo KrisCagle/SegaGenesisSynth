@@ -799,6 +799,84 @@ static void test_presets_sound_different(void) {
     CHECK(ok, "no two presets sound nearly the same");
 }
 
+/* ---- Expression: velocity -> tone, aftertouch ---- */
+
+/* High-frequency content: energy of the sample-to-sample change relative to
+ * the signal's energy. Brighter = higher. */
+static double brightness_after_note(const GenisysPatch *p, int velocity, double aftertouch) {
+    enum { N = 9600 };
+    static float l[N], r[N];
+    double diff = 0.0, energy = 0.0;
+    int i;
+    start(48000.0, p);
+    genisys_engine_aftertouch(&g_engine, aftertouch);
+    genisys_engine_note_on(&g_engine, 60, velocity);
+    genisys_engine_render(&g_engine, l, r, N);
+    for (i = N / 2; i < N; i++) {
+        double d = (double)l[i] - l[i - 1];
+        diff += d * d;
+        energy += (double)l[i] * l[i];
+    }
+    return energy > 0.0 ? diff / energy : 0.0;
+}
+
+/* Spread of the instantaneous frequency (from zero-crossing intervals). */
+static double aftertouch_pitch_wobble(const GenisysPatch *p, double aftertouch) {
+    enum { N = 48000 };
+    static float l[N], r[N];
+    double last = -1.0, sum = 0.0, sum2 = 0.0;
+    int i, n = 0;
+    start(48000.0, p);
+    genisys_engine_aftertouch(&g_engine, aftertouch);
+    genisys_engine_note_on(&g_engine, 69, 127);
+    genisys_engine_render(&g_engine, l, r, N);
+    for (i = 4800; i < N; i++) {
+        if (l[i - 1] < 0.0f && l[i] >= 0.0f) {
+            double t = i - 1 + l[i - 1] / (l[i - 1] - l[i]);
+            if (last >= 0.0) {
+                double hz = 48000.0 / (t - last);
+                sum += hz;
+                sum2 += hz * hz;
+                n++;
+            }
+            last = t;
+        }
+    }
+    return n > 1 ? sqrt(sum2 / n - (sum / n) * (sum / n)) : 0.0;
+}
+
+static void test_expression(void) {
+    GenisysPatch p = genisys_default_patch(); /* algorithm 0: OP1-3 modulate */
+    double soft, hard;
+    int i;
+    p.velocity_sens = 0; /* isolate tone from volume */
+    p.aftertouch_vibrato = 0;
+    for (i = 0; i < 3; i++) p.op[i].tl = 40;
+
+    soft = brightness_after_note(&p, 40, 0.0);
+    hard = brightness_after_note(&p, 127, 0.0);
+    CHECK(fabs(soft / hard - 1.0) < 0.02, "velocity -> tone off: soft and hard notes have the same tone");
+    p.velocity_bright = 100;
+    soft = brightness_after_note(&p, 40, 0.0);
+    hard = brightness_after_note(&p, 127, 0.0);
+    CHECK(soft < hard * 0.8, "velocity -> tone: softer notes are darker");
+    p.velocity_bright = 0;
+
+    p.aftertouch_bright = 100;
+    CHECK(brightness_after_note(&p, 100, 1.0) > brightness_after_note(&p, 100, 0.0) * 1.2,
+          "aftertouch -> brightness: pressing harder brightens");
+    p.aftertouch_bright = 0;
+
+    p = sine_patch();
+    p.vibrato_depth = 100;
+    p.vibrato_amount = 0;
+    p.aftertouch_vibrato = 0;
+    CHECK(aftertouch_pitch_wobble(&p, 1.0) < 0.5, "aftertouch -> vibrato off: pressure doesn't bend the pitch");
+    p.aftertouch_vibrato = 100;
+    CHECK(aftertouch_pitch_wobble(&p, 1.0) > 5.0, "aftertouch -> vibrato: pressure adds vibrato");
+    CHECK(aftertouch_pitch_wobble(&p, 0.0) < 0.5, "aftertouch -> vibrato: no pressure, no vibrato");
+}
+
 /* ---- Quick Sound macros ---- */
 
 static void test_macros(void) {
@@ -904,6 +982,7 @@ int main(void) {
     test_presets_are_balanced();
     test_presets_sound_different();
     test_macros();
+    test_expression();
     test_vibrato_macro();
     test_active_voices();
 

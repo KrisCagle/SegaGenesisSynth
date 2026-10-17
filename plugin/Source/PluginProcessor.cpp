@@ -48,6 +48,7 @@ void GenisysProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     forceParameterSync = true;
 
     editorMidi.reset (sampleRate);
+    arp.prepare (sampleRate);
     effects.prepare (sampleRate, samplesPerBlock, getTotalNumOutputChannels());
     masterGain.reset (sampleRate, 0.02);
     masterGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (params.masterGainDb()));
@@ -141,8 +142,15 @@ void GenisysProcessor::handleMidi (const juce::MidiMessage& message)
         genisys_engine_sustain (engine.get(), message.isSustainPedalOn() ? 1 : 0);
         return;
     }
+    if (message.isChannelPressure() || message.isAftertouch())
+    {
+        const int value = message.isChannelPressure() ? message.getChannelPressureValue() : message.getAfterTouchValue();
+        genisys_engine_aftertouch (engine.get(), value / 127.0);
+        return;
+    }
     if (message.isResetAllControllers())
     {
+        genisys_engine_aftertouch (engine.get(), 0.0);
         genisys_engine_pitch_bend (engine.get(), 0.0);
         genisys_engine_mod_wheel (engine.get(), 0.0);
         genisys_engine_sustain (engine.get(), 0);
@@ -218,6 +226,16 @@ void GenisysProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
     syncParametersToEngine();
     masterGain.setTargetValue (juce::Decibels::decibelsToGain (params.masterGainDb()));
 
+    if (auto* host = getPlayHead())
+        if (auto hostPosition = host->getPosition())
+            if (auto bpm = hostPosition->getBpm())
+                hostBpm = *bpm;
+
+    // The arpeggiator rewrites the notes; drum-kit notes pass through.
+    arp.process (midi, buffer.getNumSamples(), params.readArp(), hostBpm,
+                 [this] (const juce::MidiMessage& m)
+                 { return lastDrums.enabled && (m.getChannel() == 10 || drumsFromAllChannels); });
+
     // Render up to each MIDI event's exact sample position, so note timing
     // is sample-accurate no matter how large the host's buffer is.
     const int numSamples = buffer.getNumSamples();
@@ -237,10 +255,6 @@ void GenisysProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
         triggerAsyncUpdate();
 
     // Effects, then Master Volume (ramped per sample to avoid clicks).
-    if (auto* host = getPlayHead())
-        if (auto hostPosition = host->getPosition())
-            if (auto bpm = hostPosition->getBpm())
-                hostBpm = *bpm;
     effects.process (buffer, params.readEffects(), hostBpm);
 
     const int outputs = juce::jmin (2, buffer.getNumChannels());

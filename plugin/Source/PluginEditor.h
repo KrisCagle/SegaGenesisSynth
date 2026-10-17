@@ -7,6 +7,7 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 
 #include "PluginProcessor.h"
+#include "UndoHistory.h"
 #include "ui/MidiPanels.h"
 #include "ui/Panels.h"
 #include "ui/Widgets.h"
@@ -26,9 +27,9 @@ public:
     void resized() override;
     bool keyPressed (const juce::KeyPress&) override;
 
-    // Switches to a tab (0 = VOICE .. 6 = MIDI), as clicking it would.
+    // Switches to a tab (0 = VOICE .. 7 = MIDI), as clicking it would.
     void selectTab (int index);
-    static constexpr int numTabs = 7;
+    static constexpr int numTabs = 8;
 
     // MIDI Learn mode: outlines every mappable control; click one, then
     // move a hardware knob. (Also used by the UI snapshot tool.)
@@ -77,7 +78,10 @@ private:
     void buildDrumsPage (Page&);
     void buildFxPage (Page&);
     void buildModPage (Page&);
+    void buildArpPage (Page&);
     void buildMidiPage (Page&);
+    void setWindowScale (float scale);
+    void doUndo (bool redo);
     void refreshMidiMap();
     void loadControllerMap();
     void saveControllerMap();
@@ -109,11 +113,14 @@ private:
     genisys::ui::Logo logo;
     genisys::ui::PresetCartridge cartridge;
     genisys::ui::PadButton loadButton { "A", "LOAD" }, saveButton { "B", "SAVE" }, compareButton { "C", "A/B: A" };
-    genisys::ui::TabBar tabs { { "VOICE", "OPERATORS", "PSG", "DRUMS", "FX", "MOD", "MIDI" } };
+    genisys::ui::TabBar tabs { { "VOICE", "OPERATORS", "PSG", "DRUMS", "FX", "MOD", "ARP", "MIDI" } };
     std::array<Page, numTabs> pages;
     int currentPage = 0;
 
     genisys::ui::PixelButton learnButton { "LEARN" };
+    genisys::ui::PixelButton undoButton { "UNDO" }, redoButton { "REDO" };
+    genisys::UndoHistory history;
+    std::array<genisys::ui::PixelButton*, 4> sizeButtons {};
     genisys::ui::LearnOverlay learnOverlay;
     genisys::ui::MappingList* mappingList = nullptr;
     genisys::ui::LedToggle* pickupToggle = nullptr;

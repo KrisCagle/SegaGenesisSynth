@@ -133,6 +133,65 @@ static void test_dmp(void) {
     CHECK(genisys_patch_import(file, sizeof file, "gb.dmp", &p) == GENISYS_PATCH_NOT_FM, "DMP: other systems are rejected");
 }
 
+/* Builds a Furnace "FINS" instrument with a name block, then the FM block. */
+static size_t make_fui(uint8_t *file, unsigned version, int op_count) {
+    const size_t base = version >= 224 ? 4 : 3;
+    const size_t fm_len = 1 + base + 4 * 8;
+    size_t pos = 0;
+    int slot;
+    memcpy(file, "FINS", 4); pos = 4;
+    file[pos++] = (uint8_t)(version & 0xFF); file[pos++] = (uint8_t)(version >> 8);
+    file[pos++] = 1; file[pos++] = 0;              /* type 1: FM (OPN) */
+    memcpy(file + pos, "NA", 2); pos += 2;
+    file[pos++] = 5; file[pos++] = 0;
+    memcpy(file + pos, "Lead", 5); pos += 5;
+    memcpy(file + pos, "FM", 2); pos += 2;
+    file[pos++] = (uint8_t)fm_len; file[pos++] = 0;
+    file[pos++] = (uint8_t)(0xF0 | op_count);       /* all ops on, op count */
+    file[pos++] = (uint8_t)((5 << 4) | 6);          /* ALG 5, FB 6 */
+    file[pos++] = (uint8_t)((2 << 3) | 4);          /* AMS 2, FMS 4 */
+    file[pos++] = 0;
+    if (base == 4) file[pos++] = 0;                 /* block */
+    for (slot = 0; slot < 4; slot++) {
+        uint8_t *b = file + pos + slot * 8;
+        b[0] = (uint8_t)((DT_FILE[slot] << 4) | MUL[slot]);
+        b[1] = (uint8_t)TL[slot];
+        b[2] = (uint8_t)(((slot & 3) << 6) | (31 - slot));
+        b[3] = (uint8_t)((slot == 3 ? 0x80 : 0) | (10 + slot));
+        b[4] = (uint8_t)(5 + slot);
+        b[5] = (uint8_t)(((2 + slot) << 4) | (8 + slot));
+        b[6] = (uint8_t)(slot == 1 ? 0x0B : 0);
+        b[7] = 0;
+    }
+    pos += 4 * 8;
+    memcpy(file + pos, "EN", 2); pos += 2;
+    file[pos++] = 0; file[pos++] = 0;
+    return pos;
+}
+
+static void test_fui(void) {
+    uint8_t file[128];
+    GenisysPatch p = genisys_default_patch(), before;
+    size_t n = make_fui(file, 230, 4);
+    CHECK(genisys_patch_import(file, n, "lead.fui", &p) == GENISYS_PATCH_OK, "FUI: a Furnace instrument imports");
+    CHECK(p.algorithm == 5 && p.feedback == 6 && p.pms == 4 && p.ams == 2 && p.lfo_enable == 1,
+          "FUI: algorithm, feedback, LFO sensitivities");
+    CHECK(ops_match(&p, 1), "FUI: operators (register order, detune, SSG-EG, AM)");
+
+    p = genisys_default_patch();
+    n = make_fui(file, 200, 4); /* before version 224: 3 bytes of base data */
+    CHECK(genisys_patch_import(file, n, "old.fui", &p) == GENISYS_PATCH_OK && ops_match(&p, 1),
+          "FUI: older format versions (no Block byte) import too");
+
+    before = p;
+    n = make_fui(file, 230, 2);
+    CHECK(genisys_patch_import(file, n, "opll.fui", &p) == GENISYS_PATCH_NOT_FM, "FUI: 2-operator instruments are rejected");
+    CHECK(genisys_patch_import(file, 20, "cut.fui", &p) == GENISYS_PATCH_TRUNCATED, "FUI: a cut-off file is reported");
+    memcpy(file, "-Furnace instr.-", 16);
+    CHECK(genisys_patch_import(file, 64, "ancient.fui", &p) == GENISYS_PATCH_OLD_FURNACE, "FUI: the old format gets a clear message");
+    CHECK(memcmp(&p, &before, sizeof p) == 0, "FUI: failed imports leave the patch untouched");
+}
+
 static void test_bad_files(void) {
     uint8_t small[10] = { 0 };
     GenisysPatch p = genisys_default_patch(), before = p;
@@ -148,6 +207,7 @@ int main(void) {
     test_tfi_round_trip();
     test_vgi();
     test_dmp();
+    test_fui();
     test_bad_files();
 
     if (g_failures == 0) {

@@ -3,7 +3,7 @@
 //
 //   genisys_ui_snapshot <output-directory>
 //
-// Writes ui_0_voice.png ... ui_6_midi.png at the editor's design size, plus
+// Writes ui_0_voice.png ... ui_7_midi.png at the editor's design size, plus
 // ui_learn.png (the VOICE page in MIDI Learn mode).
 
 #include <iterator>
@@ -43,7 +43,7 @@ int main (int argc, char** argv)
         return true;
     };
 
-    static const char* names[] = { "voice", "operators", "psg", "drums", "fx", "mod", "midi" };
+    static const char* names[] = { "voice", "operators", "psg", "drums", "fx", "mod", "arp", "midi" };
     static_assert (std::size (names) == GenisysEditor::numTabs);
     for (int tab = 0; tab < GenisysEditor::numTabs; ++tab)
     {

@@ -34,6 +34,27 @@ namespace
     };
 
     juce::String hz (float v) { return juce::String (v, 1) + "HZ"; }
+
+    // The window size is a preference of the person, not of the project:
+    // kept in Genisys's own settings file.
+    juce::File settingsFile() { return genisys::userDataDirectory().getChildFile ("Settings.xml"); }
+
+    float loadWindowScale()
+    {
+        if (auto xml = juce::XmlDocument::parse (settingsFile()))
+            return (float) xml->getDoubleAttribute ("windowScale", 1.0);
+        return 1.0f;
+    }
+
+    void saveWindowScale (float scale)
+    {
+        auto xml = juce::XmlDocument::parse (settingsFile());
+        if (xml == nullptr)
+            xml = std::make_unique<juce::XmlElement> ("GENISYSSETTINGS");
+        xml->setAttribute ("windowScale", juce::String (scale, 3));
+        if (settingsFile().getParentDirectory().createDirectory())
+            xml->writeTo (settingsFile());
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -69,6 +90,7 @@ GenisysEditor::GenisysEditor (GenisysProcessor& p)
       genisys (p),
       cartridge (p),
       learnOverlay (p.midiMap),
+      history (p),
       scope (p),
       wheels (p),
       keyboard (p.keyboardState, juce::MidiKeyboardComponent::horizontalKeyboard)
@@ -96,7 +118,7 @@ GenisysEditor::GenisysEditor (GenisysProcessor& p)
     compareButton.setBounds (936, 12, 52, 58);
     setHelp (loadButton, "A - LOAD",
              "Load a Genisys preset file a friend sent you, or import a Genesis FM patch from TFM Music Maker (.TFI), VGM Music "
-             "Maker (.VGI) or DefleMask (.DMP).");
+             "Maker (.VGI), DefleMask (.DMP) or Furnace (.FUI).");
     setHelp (saveButton, "B - SAVE", "Save this sound as one of your presets (it appears under MY PRESETS), or export the FM part as a .TFI patch.");
     setHelp (compareButton, "C - COMPARE", "Flip between two versions of your sound (A and B) to compare edits.");
     loadButton.onClick = [this] { showLoadMenu(); };
@@ -119,7 +141,8 @@ GenisysEditor::GenisysEditor (GenisysProcessor& p)
                        "The square-wave chip: layers, arpeggios and noise.",
                        "The 8-bit drum kit on MIDI channel 10.",
                        "Chorus, echo and reverb.",
-                       "Vibrato, tremolo, pitch bend and display options.",
+                       "Vibrato, tremolo, pitch bend, touch response and window size.",
+                       "The FM arpeggiator: hold a chord, hear a pattern.",
                        "Link the knobs and faders on your MIDI keyboard to Genisys." };
     setHelp (tabs, "MENU", "Click a tab to switch pages.");
     tabs.onChange = [this] (int i) { showPage (i); };
@@ -134,7 +157,8 @@ GenisysEditor::GenisysEditor (GenisysProcessor& p)
     buildDrumsPage (pages[3]);
     buildFxPage (pages[4]);
     buildModPage (pages[5]);
-    buildMidiPage (pages[6]);
+    buildArpPage (pages[6]);
+    buildMidiPage (pages[7]);
 
     canvas.addChildComponent (learnOverlay);
     learnOverlay.setBounds (pages[0].getBounds());
@@ -148,6 +172,14 @@ GenisysEditor::GenisysEditor (GenisysProcessor& p)
         genisys.midiMap.forgetParam (id);
         help.show ("MIDI LEARN|Unlinked " + genisys.midiMap.parameterName (id) + ".");
     };
+    for (auto* b : { &undoButton, &redoButton })
+        canvas.addAndMakeVisible (*b);
+    undoButton.setBounds (716, 82, 78, 26);
+    redoButton.setBounds (798, 82, 78, 26);
+    undoButton.onClick = [this] { doUndo (false); };
+    redoButton.onClick = [this] { doUndo (true); };
+    setHelp (undoButton, "UNDO", "Take back the last change. Ctrl+Z (Cmd+Z on a Mac) does the same.");
+    setHelp (redoButton, "REDO", "Put back what UNDO took away. Ctrl+Shift+Z (Cmd+Shift+Z on a Mac).");
     canvas.addAndMakeVisible (learnButton);
     learnButton.setBounds (884, 82, 100, 26);
     learnButton.onClick = [this] { setLearnMode (! learnMode); };
@@ -199,7 +231,7 @@ GenisysEditor::GenisysEditor (GenisysProcessor& p)
     setResizable (true, true);
     getConstrainer()->setFixedAspectRatio ((double) theme::width / (double) theme::height);
     setResizeLimits (theme::width * 7 / 10, theme::height * 7 / 10, theme::width * 2, theme::height * 2);
-    setSize (theme::width, theme::height);
+    setWindowScale (loadWindowScale());
 
     timerCallback();
     startTimerHz (15);
@@ -207,6 +239,7 @@ GenisysEditor::GenisysEditor (GenisysProcessor& p)
 
 GenisysEditor::~GenisysEditor()
 {
+    saveWindowScale ((float) getWidth() / (float) theme::width);
     genisys.midiMap.stopLearning();
     canvas.removeMouseListener (this);
     setLookAndFeel (nullptr);
@@ -223,6 +256,22 @@ void GenisysEditor::resized()
 {
     const float scale = (float) getWidth() / (float) theme::width;
     canvas.setTransform (juce::AffineTransform::scale (scale));
+}
+
+void GenisysEditor::setWindowScale (float scale)
+{
+    scale = juce::jlimit (0.7f, 2.0f, scale);
+    setSize (juce::roundToInt (theme::width * scale), juce::roundToInt (theme::height * scale));
+    static constexpr float choices[] = { 0.75f, 1.0f, 1.25f, 1.5f };
+    for (size_t i = 0; i < sizeButtons.size(); ++i)
+        if (sizeButtons[i] != nullptr)
+            sizeButtons[i]->setLit (std::abs (choices[i] - scale) < 0.01f);
+}
+
+void GenisysEditor::doUndo (bool redo)
+{
+    const bool done = redo ? history.redo() : history.undo();
+    help.show (redo ? (done ? "REDO|Put back." : "REDO|Nothing to redo.") : (done ? "UNDO|Taken back." : "UNDO|Nothing to undo."));
 }
 
 void GenisysEditor::selectTab (int index)
@@ -458,6 +507,37 @@ void GenisysEditor::buildDrumsPage (Page& page)
                          1.1f, theme::text, true);
 }
 
+void GenisysEditor::buildArpPage (Page& page)
+{
+    page.add<MenuWindow> ({ 0, 0, 600, 372 }, "ARPEGGIATOR");
+    auto& on = page.add<LedToggle> ({ 14, 32, 120, 16 }, param ("arp_on"), "ON");
+    setHelp (on, "ARPEGGIATOR", "Hold a chord and the FM plays its notes one after another, in time with your song.");
+    auto& latch = page.add<LedToggle> ({ 160, 32, 200, 16 }, param ("arp_latch"), "LATCH");
+    setHelp (latch, "LATCH", "Keeps the pattern going after you let go. Play a new chord to replace it.");
+    page.add<PixelText> ({ 16, 62, 200, 12 }, "ORDER", 1.15f, theme::text);
+    auto& mode = page.add<SegmentedChoice> ({ 14, 78, 572, 26 }, param ("arp_mode"),
+                                            juce::StringArray { "UP", "DOWN", "UP-DOWN", "RANDOM", "AS PLAYED" });
+    setHelp (mode, "ORDER", "Which way the pattern runs through your notes. AS PLAYED keeps the order you pressed them in.");
+    page.add<PixelText> ({ 16, 118, 200, 12 }, "SPEED", 1.15f, theme::text);
+    auto& rate = page.add<SegmentedChoice> ({ 14, 134, 572, 26 }, param ("arp_rate"),
+                                            juce::StringArray { "1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32" });
+    setHelp (rate, "SPEED", "Note length of each step, following your song's tempo. T = triplets.");
+    page.addAt<RetroKnob> ({ 20, 178 }, param ("arp_octaves"), "OCTAVES")
+        .withHelp ("OCTAVES", "How many octaves the pattern climbs before it starts again.");
+    page.addAt<RetroKnob> ({ 100, 178 }, param ("arp_gate"), "GATE")
+        .withHelp ("GATE", "How long each note lasts: short and plucky, or long and smooth.");
+    page.add<PixelText> ({ 200, 186, 380, 90 },
+                         "Classic 16-bit trick: one FM channel playing a chord very fast. Try 1/32 with a bell or a square lead. "
+                         "The PSG tab has its own square-wave arpeggio.",
+                         1.15f, theme::textDim, true);
+
+    page.add<MenuWindow> ({ 610, 0, 358, 372 }, "TIPS");
+    page.add<PixelText> ({ 624, 32, 330, 320 },
+                         "Speed follows your DAW's tempo (120 BPM in the standalone app). Drum notes skip the arpeggiator. "
+                         "Every control here can be linked to a hardware knob with MIDI Learn.",
+                         1.15f, theme::text, true);
+}
+
 void GenisysEditor::buildMidiPage (Page& page)
 {
     using Layout = genisys::MidiMap::Layout;
@@ -615,9 +695,22 @@ void GenisysEditor::buildModPage (Page& page)
     page.addAt<RetroKnob> ({ 20, 64 }, param ("lfo_rate"), "RATE").withHelp ("LFO RATE", "Speed of the chip LFO.");
     page.addAt<RetroKnob> ({ 100, 64 }, param ("ams"), "TREMOLO").withHelp ("TREMOLO", "Volume pulsing on operators with TREM switched on (OPERATORS tab).");
     page.addAt<RetroKnob> ({ 180, 64 }, param ("pms"), "VIBRATO").withHelp ("CHIP VIBRATO", "Pitch wobble from the chip LFO.");
-    page.add<PixelText> ({ 14, 180, 450, 100 },
+    page.add<PixelText> ({ 14, 180, 450, 70 },
                          "Tip: the chip LFO is the authentic Genesis vibrato. The MOD WHEEL section uses smooth software vibrato instead, like game sound drivers did.",
                          1.2f, theme::textDim, true);
+    page.add<PixelText> ({ 16, 262, 200, 12 }, "WINDOW SIZE", 1.15f, theme::text);
+    {
+        static constexpr float choices[] = { 0.75f, 1.0f, 1.25f, 1.5f };
+        static const char* labels[] = { "75%", "100%", "125%", "150%" };
+        for (int i = 0; i < 4; ++i)
+        {
+            auto& b = page.add<PixelButton> ({ 14 + i * 74, 278, 70, 24 }, labels[i]);
+            setHelp (b, "WINDOW SIZE", "Make the whole panel bigger or smaller. Genisys remembers your choice. You can also drag the corner.");
+            const float scale = choices[i];
+            b.onClick = [this, scale] { setWindowScale (scale); saveWindowScale (scale); };
+            sizeButtons[(size_t) i] = &b;
+        }
+    }
     auto& crt = page.add<LedToggle> ({ 14, 320, 220, 16 }, "CRT SCANLINES");
     crt.setOn (canvas.scanlines);
     setHelp (crt, "CRT SCANLINES", "Display only: the faint TV scanlines over the panel.");
@@ -628,12 +721,20 @@ void GenisysEditor::buildModPage (Page& page)
     page.addAt<RetroKnob> ({ 590, 32 }, param ("vibrato_rate"), "SPEED").withHelp ("VIBRATO SPEED", "How fast the vibrato wobbles.");
     page.addAt<RetroKnob> ({ 670, 32 }, param ("bend_range"), "BEND").withHelp ("BEND RANGE", "How far the pitch wheel bends, in semitones.");
     page.addAt<RetroKnob> ({ 750, 32 }, param ("octave"), "OCTAVE").withHelp ("OCTAVE", "Shifts everything you play up or down.");
+    page.add<PixelText> ({ 504, 148, 300, 14 }, "TOUCH", 1.5f, theme::yellow);
+    page.addAt<RetroKnob> ({ 510, 170 }, param ("velocity_tone"), "VEL TONE")
+        .withHelp ("VELOCITY TO TONE", "Play softly for a darker sound, harder for a brighter one, like a real FM keyboard.");
+    page.addAt<RetroKnob> ({ 594, 170 }, param ("aftertouch_vibrato"), "AT VIB")
+        .withHelp ("AFTERTOUCH TO VIBRATO", "AT = aftertouch: press down harder on a held key to add vibrato (needs a keyboard with aftertouch).");
+    page.addAt<RetroKnob> ({ 678, 170 }, param ("aftertouch_bright"), "AT TONE")
+        .withHelp ("AFTERTOUCH TO BRIGHTNESS", "AT = aftertouch: press down harder on a held key to brighten the sound.");
 }
 
 // ---------------------------------------------------------------------------
 void GenisysEditor::timerCallback()
 {
     cartridge.refresh();
+    history.poll();
     refreshMidiMap();
 
     // Operator cards: carrier/modulator labels follow the algorithm.
@@ -708,6 +809,13 @@ bool GenisysEditor::keyPressed (const juce::KeyPress& key)
         }
         return true;
     }
+    if (key.getModifiers().isCommandDown() && (key.getKeyCode() == 'Z' || key.getKeyCode() == 'z' || key.getKeyCode() == 'Y'
+                                                || key.getKeyCode() == 'y'))
+    {
+        const bool redo = key.getModifiers().isShiftDown() || key.getKeyCode() == 'Y' || key.getKeyCode() == 'y';
+        doUndo (redo);
+        return true;
+    }
     if (key == juce::KeyPress::leftKey || key == juce::KeyPress::rightKey)
     {
         genisys.stepPreset (key == juce::KeyPress::rightKey ? 1 : -1);
@@ -724,7 +832,7 @@ void GenisysEditor::showLoadMenu()
 {
     juce::PopupMenu menu;
     menu.addItem (1, "Load a preset file (.genisyspreset)...");
-    menu.addItem (2, "Import a Genesis FM patch (.tfi / .vgi / .dmp)...");
+    menu.addItem (2, "Import a Genesis FM patch (.tfi / .vgi / .dmp / .fui)...");
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&loadButton),
                         [this] (int result)
                         {
@@ -795,7 +903,7 @@ void GenisysEditor::loadPresetFile()
 
 void GenisysEditor::loadPatch()
 {
-    chooser = std::make_unique<juce::FileChooser> ("Load a Genesis FM patch", juce::File(), "*.tfi;*.vgi;*.dmp");
+    chooser = std::make_unique<juce::FileChooser> ("Load a Genesis FM patch", juce::File(), "*.tfi;*.vgi;*.dmp;*.fui");
     chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                           [this] (const juce::FileChooser& fc)
                           {

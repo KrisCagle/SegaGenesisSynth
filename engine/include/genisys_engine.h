@@ -76,6 +76,11 @@ typedef struct {
     int macro_decay;   /* + = longer decays (operators that already sustain keep sustaining) */
     int macro_release; /* + = longer release */
     int vibrato_amount; /* 0-100 %: vibrato without the mod wheel (the wheel can add more) */
+
+    /* Expression (0-100 % each, 0 = off). */
+    int velocity_bright;    /* softer notes are darker: velocity also lowers the modulators */
+    int aftertouch_vibrato; /* pressing harder adds vibrato, like the mod wheel */
+    int aftertouch_bright;  /* pressing harder brightens the sound */
     GenisysOperatorParams op[4]; /* OP1..OP4 */
 } GenisysPatch;
 
@@ -209,6 +214,7 @@ typedef struct {
      * samples, ~1.7 kHz), which keeps bends and vibrato smooth. */
     double bend_semitones;
     double mod_wheel;      /* 0-1 */
+    double aftertouch;     /* 0-1 channel pressure */
     double vibrato_phase;  /* 0-1 */
     int sustain_pedal;
     int control_counter;
@@ -260,6 +266,10 @@ void genisys_engine_mod_wheel(GenisysEngine *e, double amount);
 
 /* Sustain pedal: while down, key-ups are held until the pedal is lifted. */
 void genisys_engine_sustain(GenisysEngine *e, int down);
+
+/* Channel pressure (aftertouch), 0..1. What it does is set by the patch's
+ * aftertouch_vibrato and aftertouch_bright. */
+void genisys_engine_aftertouch(GenisysEngine *e, double amount);
 
 /* Renders `frames` stereo samples. Output is nominally -1..1; the chip's
  * full mix can exceed that (6 loud voices reach about +/-1.5) instead of

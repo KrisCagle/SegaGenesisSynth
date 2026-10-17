@@ -240,10 +240,10 @@ Friends' feedback on v0.1: the most requested feature is controlling Genisys fro
 | | **Preset buttons:** ← → arrow keys, MIDI-learnable Previous/Next Preset pads, Program Change | Done |
 | **v0.3** | **Preset overhaul:** measure which presets sound alike (`tools/preset_similarity`), redesign them using the chip's under-used features (detune, all 8 algorithms, SSG-EG, feedback, key scaling), grow to about 100 | Done: 101 presets, closest pair 6.1 (was 2.8) |
 | | **User presets:** save your own sounds (FM + PSG + FX), favourites, browse by category, share as files | Done |
-| **v0.4** | **Expression:** velocity → brightness, aftertouch → vibrato/brightness | Planned |
-| | **FM arpeggiator** | Planned |
-| | **Window size** presets, **undo/redo** | Planned |
-| | **Furnace (.fui)** patch import | Planned |
+| **v0.4** | **Expression:** velocity → brightness, aftertouch → vibrato/brightness | Done |
+| | **FM arpeggiator** | Done |
+| | **Window size** presets, **undo/redo** | Done |
+| | **Furnace (.fui)** patch import | Done |
 
 **Why a hardware map lives in the plugin, not the DAW:** every DAW has its own way of mapping controllers (Ableton's MIDI Map, Logic's Smart Controls...), and none of them carry over between DAWs. Built-in MIDI Learn works the same everywhere, including the Standalone app.
 

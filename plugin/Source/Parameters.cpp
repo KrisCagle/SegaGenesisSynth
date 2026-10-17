@@ -84,6 +84,9 @@ namespace
     // Echo note lengths, in quarter notes.
     const juce::StringArray kEchoDivisionNames { "1/4", "1/8", "1/8 dotted", "1/16", "1/4 dotted", "1/8 triplet" };
     constexpr float kEchoDivisionBeats[] = { 1.0f, 0.5f, 0.75f, 0.25f, 1.5f, 1.0f / 3.0f };
+    // Arpeggiator step lengths, in quarter notes.
+    const juce::StringArray kArpRateNames { "1/4", "1/8", "1/8 triplet", "1/16", "1/16 triplet", "1/32" };
+    constexpr double kArpRateBeats[] = { 1.0, 0.5, 1.0 / 3.0, 0.25, 1.0 / 6.0, 0.125 };
     juce::String unisonLabel (int v) { return v == 1 ? juce::String ("Off") : juce::String (v) + " channels"; }
 
     // PSG envelopes step once per 60 Hz frame (~16.7 ms).
@@ -140,6 +143,21 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     layout.add (intParam ("macro_decay", "Quick: Decay", -100, 100, 0, signedPercentLabel));
     layout.add (intParam ("macro_release", "Quick: Release", -100, 100, 0, signedPercentLabel));
     layout.add (intParam ("vibrato_amount", "Quick: Vibrato", 0, 100, 0, percentLabel));
+    layout.add (intParam ("velocity_tone", "Velocity to Tone", 0, 100, def.velocity_bright, percentLabel));
+    layout.add (intParam ("aftertouch_vibrato", "Aftertouch to Vibrato", 0, 100, def.aftertouch_vibrato, percentLabel));
+    layout.add (intParam ("aftertouch_bright", "Aftertouch to Brightness", 0, 100, def.aftertouch_bright, percentLabel));
+
+    // FM arpeggiator (before the synth; see Arpeggiator.h).
+    layout.add (boolParam ("arp_on", "Arpeggiator On", false));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (
+        juce::ParameterID { "arp_mode", kVersion }, "Arpeggiator Mode",
+        juce::StringArray { "Up", "Down", "Up-Down", "Random", "As Played" }, 0));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (
+        juce::ParameterID { "arp_rate", kVersion }, "Arpeggiator Rate", kArpRateNames, 3));
+    layout.add (intParam ("arp_octaves", "Arpeggiator Octaves", 1, 4, 1));
+    layout.add (intParam ("arp_gate", "Arpeggiator Gate", 10, 100, 50, percentLabel));
+    layout.add (boolParam ("arp_latch", "Arpeggiator Latch", false));
+
     layout.add (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "master_gain", kVersion }, "Master Volume",
         juce::NormalisableRange<float> (-24.0f, 12.0f, 0.1f), 0.0f,
@@ -260,7 +278,11 @@ Snapshot::Snapshot (juce::AudioProcessorValueTreeState& state)
       psgAttack (raw (state, "psg_attack")), psgDecay (raw (state, "psg_decay")),
       psgSustain (raw (state, "psg_sustain")), psgRelease (raw (state, "psg_release")),
       psgArpSpeed (raw (state, "psg_arp_speed")), drumsOn (raw (state, "drums_on")),
-      drumLevel (raw (state, "drum_level")), drumInput (raw (state, "drum_input"))
+      drumLevel (raw (state, "drum_level")), drumInput (raw (state, "drum_input")),
+      velocityTone (raw (state, "velocity_tone")), aftertouchVibrato (raw (state, "aftertouch_vibrato")),
+      aftertouchBright (raw (state, "aftertouch_bright")),
+      arpOn (raw (state, "arp_on")), arpMode (raw (state, "arp_mode")), arpRate (raw (state, "arp_rate")),
+      arpOctaves (raw (state, "arp_octaves")), arpGate (raw (state, "arp_gate")), arpLatch (raw (state, "arp_latch"))
 {
     for (int op = 0; op < 4; ++op)
     {
@@ -302,6 +324,9 @@ GenisysPatch Snapshot::readPatch() const
     patch.macro_decay = asInt (macroDecay);
     patch.macro_release = asInt (macroRelease);
     patch.vibrato_amount = asInt (vibratoAmount);
+    patch.velocity_bright = asInt (velocityTone);
+    patch.aftertouch_vibrato = asInt (aftertouchVibrato);
+    patch.aftertouch_bright = asInt (aftertouchBright);
 
     for (size_t op = 0; op < 4; ++op)
     {
@@ -354,6 +379,18 @@ EffectSettings Snapshot::readEffects() const
     fx.reverbWidth = percent (reverbWidth);
     fx.reverbMix = percent (reverbMix);
     return fx;
+}
+
+Arpeggiator::Settings Snapshot::readArp() const
+{
+    Arpeggiator::Settings s;
+    s.on = asInt (arpOn) != 0;
+    s.mode = (Arpeggiator::Mode) juce::jlimit (0, 4, asInt (arpMode));
+    s.beatsPerStep = kArpRateBeats[juce::jlimit (0, 5, asInt (arpRate))];
+    s.octaves = asInt (arpOctaves);
+    s.gate = (float) asInt (arpGate) / 100.0f;
+    s.latch = asInt (arpLatch) != 0;
+    return s;
 }
 
 GenisysDrumSettings Snapshot::readDrums() const
@@ -439,6 +476,9 @@ void applyPatch (juce::AudioProcessorValueTreeState& state, const GenisysPatch& 
     set ("macro_decay", patch.macro_decay);
     set ("macro_release", patch.macro_release);
     set ("vibrato_amount", patch.vibrato_amount);
+    set ("velocity_tone", patch.velocity_bright);
+    set ("aftertouch_vibrato", patch.aftertouch_vibrato);
+    set ("aftertouch_bright", patch.aftertouch_bright);
 
     for (int op = 0; op < 4; ++op)
     {

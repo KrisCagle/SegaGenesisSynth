@@ -10,7 +10,9 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_events/juce_events.h>
 
+#include "Arpeggiator.h"
 #include "PluginProcessor.h"
+#include "UndoHistory.h"
 #include "genisys_presets.h"
 
 namespace
@@ -480,6 +482,165 @@ namespace
         dir.deleteRecursively();
     }
 
+    // Runs the arpeggiator over `total` samples in blocks; returns the
+    // note-ons (note, absolute sample) and note-offs it produced.
+    struct ArpEvent { int note, sample; bool on; };
+    std::vector<ArpEvent> runArp (genisys::Arpeggiator& arp, const genisys::Arpeggiator::Settings& s, juce::MidiBuffer first,
+                                  int total, int block = 1000, std::function<void (juce::MidiBuffer&, int)> inject = {})
+    {
+        std::vector<ArpEvent> out;
+        for (int start = 0; start < total; start += block)
+        {
+            juce::MidiBuffer midi;
+            if (start == 0)
+                midi = first;
+            if (inject)
+                inject (midi, start);
+            arp.process (midi, block, s, 120.0, [] (const juce::MidiMessage& m) { return m.getChannel() == 10; });
+            for (const auto m : midi)
+            {
+                const auto msg = m.getMessage();
+                if (msg.isNoteOn()) out.push_back ({ msg.getNoteNumber(), start + m.samplePosition, true });
+                else if (msg.isNoteOff()) out.push_back ({ msg.getNoteNumber(), start + m.samplePosition, false });
+            }
+        }
+        return out;
+    }
+
+    std::vector<int> noteOns (const std::vector<ArpEvent>& events)
+    {
+        std::vector<int> notes;
+        for (const auto& e : events)
+            if (e.on)
+                notes.push_back (e.note);
+        return notes;
+    }
+
+    void testArpeggiator()
+    {
+        using Mode = genisys::Arpeggiator::Mode;
+        genisys::Arpeggiator::Settings s;
+        s.on = true;
+        s.beatsPerStep = 0.25; // 1/16 at 120 BPM, 48 kHz = 6000 samples
+        s.gate = 0.5f;
+        juce::MidiBuffer chord;
+        chord.addEvent (juce::MidiMessage::noteOn (1, 64, (juce::uint8) 100), 0);
+        chord.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+        chord.addEvent (juce::MidiMessage::noteOn (1, 67, (juce::uint8) 100), 0);
+
+        genisys::Arpeggiator arp;
+        arp.prepare (kRate);
+        auto events = runArp (arp, s, chord, 24000);
+        check (noteOns (events) == std::vector<int> { 60, 64, 67, 60 }, "arp: UP plays the chord low to high, then repeats");
+        bool timed = true;
+        int onCount = 0;
+        for (const auto& e : events)
+        {
+            if (e.on && e.sample != 6000 * onCount++) timed = false;
+            if (! e.on && e.sample % 6000 != 3000) timed = false;
+        }
+        check (timed, "arp: steps land exactly on 1/16 notes, and a 50% gate ends each note halfway");
+
+        s.mode = Mode::down;
+        arp.prepare (kRate);
+        check (noteOns (runArp (arp, s, chord, 18000)) == std::vector<int> { 67, 64, 60 }, "arp: DOWN plays high to low");
+
+        s.mode = Mode::upDown;
+        arp.prepare (kRate);
+        check (noteOns (runArp (arp, s, chord, 36000)) == std::vector<int> { 60, 64, 67, 64, 60, 64 },
+               "arp: UP-DOWN bounces without repeating the ends");
+
+        s.mode = Mode::asPlayed;
+        arp.prepare (kRate);
+        check (noteOns (runArp (arp, s, chord, 18000)) == std::vector<int> { 64, 60, 67 }, "arp: AS PLAYED keeps the order keys went down");
+
+        s.mode = Mode::up;
+        s.octaves = 2;
+        arp.prepare (kRate);
+        check (noteOns (runArp (arp, s, chord, 36000)) == std::vector<int> { 60, 64, 67, 72, 76, 79 }, "arp: 2 octaves climbs an octave higher");
+        s.octaves = 1;
+
+        // Letting go stops the pattern (and its last note).
+        arp.prepare (kRate);
+        events = runArp (arp, s, chord, 30000, 1000, [] (juce::MidiBuffer& m, int start)
+        {
+            if (start == 9000)
+                for (int n : { 60, 64, 67 })
+                    m.addEvent (juce::MidiMessage::noteOff (1, n), 0);
+        });
+        check (noteOns (events).size() == 2 && ! events.back().on, "arp: letting go of the keys stops it");
+
+        // Latch keeps going after the keys are let go.
+        s.latch = true;
+        arp.prepare (kRate);
+        events = runArp (arp, s, chord, 30000, 1000, [] (juce::MidiBuffer& m, int start)
+        {
+            if (start == 9000)
+                for (int n : { 60, 64, 67 })
+                    m.addEvent (juce::MidiMessage::noteOff (1, n), 0);
+        });
+        check (noteOns (events).size() == 5, "arp: LATCH keeps playing after the keys are let go");
+        s.latch = false;
+
+        // Drum-kit notes pass straight through.
+        arp.prepare (kRate);
+        juce::MidiBuffer drum;
+        drum.addEvent (juce::MidiMessage::noteOn (10, 36, (juce::uint8) 100), 100);
+        events = runArp (arp, s, drum, 12000);
+        check (events.size() == 1 && events[0].note == 36 && events[0].sample == 100, "arp: drum notes skip the arpeggiator");
+    }
+
+    void testUndoHistory()
+    {
+        auto p = makeProcessor();
+        genisys::UndoHistory history (*p);
+        const int start = intParam (*p, "feedback");
+        const auto settle = [&] { for (int i = 0; i <= genisys::UndoHistory::settlePolls; ++i) history.poll(); };
+
+        check (! history.canUndo(), "undo: nothing to undo at first");
+        setIntParam (*p, "feedback", 5);
+        settle();
+        setIntParam (*p, "feedback", 2);
+        settle();
+        check (history.undo() && intParam (*p, "feedback") == 5, "undo: steps back one change");
+        check (history.undo() && intParam (*p, "feedback") == start, "undo: and another");
+        check (! history.undo(), "undo: stops at the beginning");
+        check (history.redo() && intParam (*p, "feedback") == 5, "redo: puts a change back");
+
+        // A change still settling is undone too.
+        setIntParam (*p, "algorithm", 6);
+        history.poll();
+        check (history.undo() && intParam (*p, "algorithm") != 6, "undo: works straight after a change");
+        check (! history.canRedo() || history.redo(), "redo: available after undo");
+
+        // A whole preset load is one step.
+        settle();
+        const int before = intParam (*p, "algorithm");
+        p->setCurrentProgram (20);
+        settle();
+        check (history.undo() && intParam (*p, "algorithm") == before, "undo: a preset load is one step");
+    }
+
+    void testExpressionParameters()
+    {
+        auto p = makeProcessor();
+        int tine = -1;
+        for (int i = 0; i < p->getNumPrograms(); ++i)
+            if (p->getProgramName (i) == "Tine E.Piano")
+                tine = i;
+        p->setCurrentProgram (tine);
+        check (intParam (*p, "velocity_tone") == 60, "expression: presets set velocity-to-tone");
+        check (intParam (*p, "aftertouch_vibrato") == 40, "expression: aftertouch vibrato is on by default");
+
+        // Channel pressure reaches the engine without upsetting anything.
+        juce::AudioBuffer<float> buffer (2, kBlock);
+        juce::MidiBuffer midi;
+        midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+        midi.addEvent (juce::MidiMessage::channelPressureChange (1, 127), 100);
+        process (*p, buffer, midi);
+        check (peak (buffer, 0, kBlock) > 0.01f, "expression: notes play with aftertouch");
+    }
+
     void testSustainPedal()
     {
         auto p = makeProcessor();
@@ -691,6 +852,9 @@ int main()
     testControllerLayouts();
     testPresetButtons();
     testUserPresets();
+    testArpeggiator();
+    testUndoHistory();
+    testExpressionParameters();
     testSustainPedal();
     testOctaveShiftReleasesCorrectNote();
     testEffectsOffIsUntouched();
