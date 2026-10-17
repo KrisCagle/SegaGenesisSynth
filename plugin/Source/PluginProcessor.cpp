@@ -80,6 +80,7 @@ void GenisysProcessor::syncParametersToEngine()
         lastConsole = console;
     }
 
+    drumsFromAllChannels = params.drumsFromAllChannels();
     const GenisysDrumSettings drums = params.readDrums();
     if (forceParameterSync || std::memcmp (&drums, &lastDrums, sizeof drums) != 0)
     {
@@ -94,7 +95,9 @@ void GenisysProcessor::handleMidi (const juce::MidiMessage& message)
 {
     // General MIDI convention: channel 10 is drums. Drum hits are one-shots,
     // so their note-offs are ignored. With drums off, channel 10 plays FM.
-    if (lastDrums.enabled && message.getChannel() == 10)
+    // Only notes go to the kit: controllers still reach the synth.
+    if (lastDrums.enabled && (message.isNoteOn() || message.isNoteOff())
+        && (message.getChannel() == 10 || drumsFromAllChannels))
     {
         if (message.isNoteOn())
             genisys_engine_drum_hit (engine.get(), message.getNoteNumber(), message.getVelocity());

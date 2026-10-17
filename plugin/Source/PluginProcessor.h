@@ -86,6 +86,7 @@ private:
     GenisysPsgSettings lastPsg {};
     GenisysConsoleSettings lastConsole {};
     GenisysDrumSettings lastDrums {};
+    bool drumsFromAllChannels = false;
     bool forceParameterSync = true;
 
     genisys::Effects effects;

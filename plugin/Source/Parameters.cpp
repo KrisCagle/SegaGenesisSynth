@@ -216,6 +216,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     // Drum kit on MIDI channel 10 (General MIDI drum notes).
     layout.add (boolParam ("drums_on", "Drums On (MIDI ch 10)", false));
     layout.add (intParam ("drum_level", "Drum Level", 0, 100, 80, percentLabel));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (
+        juce::ParameterID { "drum_input", kVersion }, "Drum Notes From",
+        juce::StringArray { "MIDI Ch 10", "All MIDI" }, 0));
     layout.add (boolParam ("noise_on", "Noise On", false));
     layout.add (std::make_unique<juce::AudioParameterChoice> (
         juce::ParameterID { "noise_white", kVersion }, "Noise Type", juce::StringArray { "Periodic", "White" }, 1));
@@ -257,7 +260,7 @@ Snapshot::Snapshot (juce::AudioProcessorValueTreeState& state)
       psgAttack (raw (state, "psg_attack")), psgDecay (raw (state, "psg_decay")),
       psgSustain (raw (state, "psg_sustain")), psgRelease (raw (state, "psg_release")),
       psgArpSpeed (raw (state, "psg_arp_speed")), drumsOn (raw (state, "drums_on")),
-      drumLevel (raw (state, "drum_level"))
+      drumLevel (raw (state, "drum_level")), drumInput (raw (state, "drum_input"))
 {
     for (int op = 0; op < 4; ++op)
     {
@@ -356,7 +359,8 @@ EffectSettings Snapshot::readEffects() const
 GenisysDrumSettings Snapshot::readDrums() const
 {
     GenisysDrumSettings drums {};
-    drums.enabled = asInt (drumsOn);
+    // All-MIDI mode needs the kit on: choosing it is enough.
+    drums.enabled = asInt (drumsOn) || drumsFromAllChannels();
     drums.level = asInt (drumLevel);
     return drums;
 }

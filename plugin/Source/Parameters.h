@@ -31,6 +31,11 @@ namespace genisys::params
         GenisysPsgSettings readPsg() const;
         GenisysConsoleSettings readConsole() const;
         GenisysDrumSettings readDrums() const;
+
+        // "All MIDI" drum mode: every incoming note plays the kit, so a
+        // second Genisys can act as a drum machine in DAWs (like Ableton)
+        // that always send channel 1.
+        bool drumsFromAllChannels() const { return std::lround (drumInput->load (std::memory_order_relaxed)) == 1; }
         EffectSettings readEffects() const;
         float masterGainDb() const { return masterGain->load(); }
         int octave() const { return (int) std::lround (octaveShift->load (std::memory_order_relaxed)); }
@@ -66,6 +71,7 @@ namespace genisys::params
         std::atomic<float>* psgMode; std::atomic<float>* psgOctave; std::atomic<float>* psgAttack;
         std::atomic<float>* psgDecay; std::atomic<float>* psgSustain; std::atomic<float>* psgRelease;
         std::atomic<float>* psgArpSpeed; std::atomic<float>* drumsOn; std::atomic<float>* drumLevel;
+        std::atomic<float>* drumInput;
         std::array<OpParams, 4> ops;
     };
 

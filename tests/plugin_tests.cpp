@@ -246,6 +246,25 @@ namespace
         check (peakLevel > 0.05f, "with drums on, a channel 10 kick plays the drum kit");
     }
 
+    void testDrumMachineMode()
+    {
+        // Ableton sends everything on channel 1: "All MIDI" mode must turn
+        // those notes into drum hits on its own (Drums On left off).
+        auto p = makeProcessor();
+        setIntParam (*p, "drum_input", 1);
+        juce::AudioBuffer<float> buffer (2, kBlock);
+        juce::MidiBuffer midi;
+        midi.addEvent (juce::MidiMessage::noteOn (1, 36, (juce::uint8) 127), 0);
+        float loudest = 0.0f;
+        for (int i = 0; i < 4; ++i)
+        {
+            process (*p, buffer, midi);
+            loudest = juce::jmax (loudest, peak (buffer, 0, kBlock));
+        }
+        check (loudest > 0.05f, "drum machine mode: a channel 1 kick plays the drum kit");
+        check (p->getActiveVoices() == 0, "drum machine mode: no FM synth voice plays for drum notes");
+    }
+
     void testSustainPedal()
     {
         auto p = makeProcessor();
@@ -450,6 +469,7 @@ int main()
     testProgramChange();
     testPresetLoadsLayersAndEffects();
     testDrumsOnChannel10();
+    testDrumMachineMode();
     testSustainPedal();
     testOctaveShiftReleasesCorrectNote();
     testEffectsOffIsUntouched();

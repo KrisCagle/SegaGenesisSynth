@@ -100,7 +100,9 @@ The installer puts the VST3, the Audio Unit and the Standalone app in the right 
   - **BEND** and **MOD** are on-screen wheels.
 - **Drums:**
   - Turn on **Drums On** (DRUMS tab), then play MIDI channel 10 (kick on C2, snare on D2, closed hat on F♯2, and so on).
+  - **Drum machine (Ableton and most DAWs):** put a second Genisys on its own track and set **Drum Notes From** to **ALL MIDI**. Every note on that track now plays the kit, whatever MIDI channel it's on. Drop any drum MIDI clip on the track and it just works.
   - You can also click the pads, or switch on **Keys Play Drums**.
+  - Note names differ between DAWs: Ableton calls the kick note **C1**, other DAWs call it C2. It's the same note (MIDI 36).
 - **Patches:**
   - **A** loads community Genesis patches (`.tfi`, `.vgi`, `.dmp`).
   - **B** saves your sound as `.tfi`.
@@ -134,7 +136,7 @@ The installer puts the VST3, the Audio Unit and the Standalone app in the right 
 - **The console's sound path:**
   - the YM2612's 9-bit DAC and its gritty "ladder effect" (switchable to the cleaner YM3438 or a fully clean output)
   - a Model 1-style output filter
-- **Drum kit on MIDI channel 10:**
+- **Drum kit** on MIDI channel 10, or on every channel in drum machine mode:
   - 8-bit kick, snare, clap and tom samples played through FM channel 6's DAC, as Genesis games did. They're synthesized, not recorded.
   - hi-hats and cymbals on the PSG noise channel
 - **PSG layer:** the square-wave channels can double your FM notes or play a chiptune arpeggio, with envelopes that step at 60 Hz like the original sound drivers.
