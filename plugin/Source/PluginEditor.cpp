@@ -277,19 +277,24 @@ void GenisysEditor::buildPsgPage (Page& page)
 
 void GenisysEditor::buildDrumsPage (Page& page)
 {
-    page.add<MenuWindow> ({ 0, 0, 700, 372 }, "DRUM KIT - MIDI CH 10");
+    page.add<MenuWindow> ({ 0, 0, 700, 372 }, "DRUM KIT");
     page.add<DrumPads> ({ 12, 32, 674, 320 }, genisys);
 
     page.add<MenuWindow> ({ 710, 0, 258, 372 }, "KIT");
     auto& on = page.add<LedToggle> ({ 724, 32, 220, 16 }, param ("drums_on"), "DRUMS ON");
     setHelp (on, "DRUMS ON", "Gives FM channel 6 to the drum sampler, like the games did. FM then has 5 voices.");
-    page.addAt<RetroKnob> ({ 724, 60 }, param ("drum_level"), "LEVEL").withHelp ("DRUM LEVEL", "Volume of the whole kit.");
-    auto& keys = page.add<LedToggle> ({ 724, 172, 230, 16 }, "KEYS PLAY DRUMS");
+    page.addAt<RetroKnob> ({ 724, 56 }, param ("drum_level"), "LEVEL").withHelp ("DRUM LEVEL", "Volume of the whole kit.");
+    page.add<PixelText> ({ 726, 158, 220, 12 }, "DRUM NOTES FROM", 1.15f, theme::text);
+    auto& input = page.add<SegmentedChoice> ({ 724, 174, 228, 26 }, param ("drum_input"), juce::StringArray { "CH 10", "ALL MIDI" });
+    setHelp (input, "DRUM NOTES FROM",
+             "CH 10: only MIDI channel 10 plays drums (the General MIDI standard). ALL MIDI: every note plays drums - use a second "
+             "Genisys on its own track as a drum machine. Best for Ableton, which always sends channel 1.");
+    auto& keys = page.add<LedToggle> ({ 724, 214, 230, 16 }, "KEYS PLAY DRUMS");
     setHelp (keys, "KEYS PLAY DRUMS", "Sends the on-screen and computer keyboard to the drum kit instead of the synth.");
     keys.onChange = [this] (bool drums) { setKeyboardToDrums (drums); };
-    page.add<PixelText> ({ 724, 204, 230, 150 },
-                         "Yellow pads: 8-bit samples through the FM chip's DAC. Cyan pads: PSG noise. Play from any MIDI channel 10.",
-                         1.15f, theme::text, true);
+    page.add<PixelText> ({ 724, 244, 230, 116 },
+                         "Yellow pads: 8-bit samples through the FM chip's DAC. Cyan pads: PSG noise. Kick C2, snare D2, closed hat F#2.",
+                         1.1f, theme::text, true);
 }
 
 void GenisysEditor::buildFxPage (Page& page)
