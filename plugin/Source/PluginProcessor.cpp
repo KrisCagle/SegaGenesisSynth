@@ -305,6 +305,10 @@ void GenisysProcessor::setCurrentProgram (int index)
         return;
 
     currentProgram = index;
+    userPresetName.clear();
+    userPresetCategory.clear();
+    userPresetFile = juce::File();
+    ++presetChanges;
     genisys::params::applyPreset (state, index);
 }
 
@@ -313,6 +317,26 @@ void GenisysProcessor::stepPreset (int delta)
     const int n = getNumPrograms();
     if (n > 0 && delta != 0)
         setCurrentProgram (((currentProgram + delta) % n + n) % n);
+}
+
+bool GenisysProcessor::loadUserPreset (const juce::File& file)
+{
+    const auto loaded = genisys::PresetLibrary::load (state, file);
+    if (loaded.name.isEmpty())
+        return false;
+    userPresetName = loaded.name;
+    userPresetCategory = loaded.category;
+    userPresetFile = file;
+    ++presetChanges;
+    return true;
+}
+
+GenisysProcessor::PresetInfo GenisysProcessor::getCurrentPresetInfo() const
+{
+    if (userPresetName.isNotEmpty())
+        return { userPresetCategory, userPresetName, presetLibrary.userKey (userPresetFile), true };
+    const juce::String name (genisys_preset_name (currentProgram));
+    return { juce::String (genisys_preset_category (currentProgram)), name, genisys::PresetLibrary::factoryKey (name), false };
 }
 
 void GenisysProcessor::applyPendingPresetChanges()
@@ -361,6 +385,12 @@ void GenisysProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto copy = state.copyState();
     copy.setProperty ("program", currentProgram, nullptr);
+    if (userPresetName.isNotEmpty())
+    {
+        copy.setProperty ("userPresetName", userPresetName, nullptr);
+        copy.setProperty ("userPresetCategory", userPresetCategory, nullptr);
+        copy.setProperty ("userPresetFile", userPresetFile.getFullPathName(), nullptr);
+    }
     copy.appendChild (midiMap.toValueTree(), nullptr);
     if (auto xml = copy.createXml())
         copyXmlToBinary (*xml, destData);
@@ -374,6 +404,10 @@ void GenisysProcessor::setStateInformation (const void* data, int sizeInBytes)
         {
             auto restored = juce::ValueTree::fromXml (*xml);
             currentProgram = restored.getProperty ("program", 0);
+            userPresetName = restored.getProperty ("userPresetName").toString();
+            userPresetCategory = restored.getProperty ("userPresetCategory").toString();
+            userPresetFile = juce::File (restored.getProperty ("userPresetFile").toString());
+            ++presetChanges;
             // Projects from before MIDI Learn have no map: keep the default.
             const auto map = restored.getChildWithName (genisys::MidiMap::treeType);
             if (map.isValid())

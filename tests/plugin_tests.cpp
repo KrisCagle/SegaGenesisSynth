@@ -431,6 +431,55 @@ namespace
         check (q->midiMap.ccFor (genisys::MidiMap::previousPresetId) == 61, "preset buttons: links are saved with the project");
     }
 
+    void testUserPresets()
+    {
+        auto p = makeProcessor();
+        const auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                             .getChildFile ("genisys_preset_test_" + juce::String (juce::Random::getSystemRandom().nextInt (1000000)));
+        p->presetLibrary = genisys::PresetLibrary (dir);
+
+        p->setCurrentProgram (10);
+        setIntParam (*p, "feedback", 6);
+        setIntParam (*p, "reverb_mix", 42);
+        setIntParam (*p, "psg_level", 9);
+        setIntParam (*p, "octave", 2);
+        const auto file = p->presetLibrary.save (p->state, "My Sound", "Leads");
+        check (file.existsAsFile() && file.getParentDirectory().getFileName() == "Leads", "user presets: saved into a category folder");
+        const auto list = p->presetLibrary.scan();
+        check (list.size() == 1 && list[0].name == "My Sound" && list[0].category == "Leads", "user presets: the library lists it");
+
+        p->setCurrentProgram (1);
+        setIntParam (*p, "octave", 0);
+        check (p->loadUserPreset (file), "user presets: loads back");
+        check (intParam (*p, "feedback") == 6 && intParam (*p, "reverb_mix") == 42 && intParam (*p, "psg_level") == 9,
+               "user presets: FM, effects and PSG settings come back");
+        check (intParam (*p, "octave") == 0, "user presets: player settings (octave) are left alone");
+        const auto info = p->getCurrentPresetInfo();
+        check (info.user && info.name == "My Sound" && info.category == "Leads", "user presets: the cartridge shows the user preset");
+
+        p->presetLibrary.setFavorite (info.favoriteKey, true);
+        p->presetLibrary.setFavorite (genisys::PresetLibrary::factoryKey ("Slap Bass"), true);
+        check (p->presetLibrary.isFavorite (info.favoriteKey) && p->presetLibrary.favorites().size() == 2,
+               "favourites: user and factory presets can be starred");
+        p->presetLibrary.setFavorite (info.favoriteKey, false);
+        check (! p->presetLibrary.isFavorite (info.favoriteKey), "favourites: and unstarred");
+
+        juce::MemoryBlock saved;
+        p->getStateInformation (saved);
+        auto q = makeProcessor();
+        q->setStateInformation (saved.getData(), (int) saved.getSize());
+        check (q->getCurrentPresetInfo().user && q->getCurrentPresetInfo().name == "My Sound",
+               "user presets: the project remembers which one was loaded");
+
+        p->setCurrentProgram (3);
+        check (! p->getCurrentPresetInfo().user, "user presets: picking a factory preset switches back");
+
+        const auto bogus = dir.getChildFile ("bogus.genisyspreset");
+        bogus.replaceWithText ("<nope/>");
+        check (! p->loadUserPreset (bogus), "user presets: a file that isn't a preset is refused");
+        dir.deleteRecursively();
+    }
+
     void testSustainPedal()
     {
         auto p = makeProcessor();
@@ -641,6 +690,7 @@ int main()
     testMidiMapSavedWithProject();
     testControllerLayouts();
     testPresetButtons();
+    testUserPresets();
     testSustainPedal();
     testOctaveShiftReleasesCorrectNote();
     testEffectsOffIsUntouched();

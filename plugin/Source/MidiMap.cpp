@@ -1,4 +1,5 @@
 #include "MidiMap.h"
+#include "PresetLibrary.h" // userDataDirectory()
 
 namespace genisys
 {
@@ -334,11 +335,7 @@ void MidiMap::fromValueTree (const juce::ValueTree& tree)
 
 juce::File MidiMap::defaultMapFile()
 {
-    auto dir = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory);
-#if JUCE_MAC
-    dir = dir.getChildFile ("Application Support"); // ~/Library/Application Support
-#endif
-    return dir.getChildFile ("Genisys").getChildFile ("Default Controller Map.xml");
+    return userDataDirectory().getChildFile ("Default Controller Map.xml");
 }
 
 bool MidiMap::saveAsDefault() const

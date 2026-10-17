@@ -43,6 +43,7 @@ target_sources(GenisysSharedCode INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/Parameters.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/PluginEditor.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/PluginProcessor.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/PresetLibrary.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/ui/PixelFont.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/ui/Widgets.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/ui/Panels.cpp

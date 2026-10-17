@@ -9,6 +9,7 @@
 
 #include "MidiMap.h"
 #include "Parameters.h"
+#include "PresetLibrary.h"
 
 // The Genisys plugin: wraps one GenisysEngine and connects it to the host's
 // MIDI, parameters, sample rate and saved state.
@@ -48,6 +49,23 @@ public:
 
     // Moves `delta` presets along, wrapping around. Message thread.
     void stepPreset (int delta);
+
+    // The user's own presets and favourites (files in Genisys's folder).
+    genisys::PresetLibrary presetLibrary;
+
+    // Loads a .genisyspreset file. Returns false if it isn't one.
+    bool loadUserPreset (const juce::File&);
+
+    // What the cartridge shows: a factory preset or a user preset.
+    struct PresetInfo
+    {
+        juce::String category, name;
+        juce::String favoriteKey; // see PresetLibrary
+        bool user = false;
+    };
+    PresetInfo getCurrentPresetInfo() const;
+    // Goes up whenever a different preset is loaded (message thread).
+    juce::uint32 getPresetChangeCount() const { return presetChanges; }
 
     // Preset changes asked for from the audio thread (mapped preset
     // buttons, MIDI program changes) are applied here, on the message
@@ -111,6 +129,9 @@ private:
     std::vector<float> scratchLeft, scratchRight;
 
     int currentProgram = 0;
+    juce::String userPresetName, userPresetCategory; // empty = a factory preset is showing
+    juce::File userPresetFile;
+    juce::uint32 presetChanges = 0;
     std::atomic<int> pendingProgram { -1 }; // from a MIDI program change
 
     std::atomic<uint8_t> activeVoices { 0 };

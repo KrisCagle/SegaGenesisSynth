@@ -79,6 +79,8 @@ The installer puts the VST3, the Audio Unit and the Standalone app in the right 
 - **Pick a sound:**
   - There are 101 presets in 12 categories.
   - Use the **◀ ▶** arrows on the cartridge (or the **← →** arrow keys on your computer), or click its label for the full list.
+  - **Your own presets:** press **B → Save as one of my presets**, or pick **Save current sound as a preset** in the cartridge menu. They appear under **My Presets** and include the FM sound, PSG layer, effects and play mode. Send the `.genisyspreset` file to a friend; they load it with **A → Load a preset file**.
+  - **Favorites:** click the ★ on the cartridge. Starred presets are listed at the top of the cartridge menu.
   - To step presets from your MIDI keyboard, right-click a cartridge arrow → **MIDI Learn** and press a pad or button. MIDI Program Change messages pick presets too.
 - **Hover for help:**
   - The black text box at the bottom explains whatever your mouse is over.
@@ -113,8 +115,8 @@ The installer puts the VST3, the Audio Unit and the Standalone app in the right 
   - **Pickup** stops sounds jumping when a hardware knob is somewhere else: the knob takes over once it reaches the current setting.
   - Links are saved with your project. **Set as default** makes every new Genisys start with them. **Save map / Load map** share them as a file.
 - **Patches:**
-  - **A** loads community Genesis patches (`.tfi`, `.vgi`, `.dmp`).
-  - **B** saves your sound as `.tfi`.
+  - **A** loads a Genisys preset file, or imports community Genesis patches (`.tfi`, `.vgi`, `.dmp`).
+  - **B** saves your sound as one of your presets, or exports its FM part as `.tfi`.
   - **C** flips between two versions of a sound so you can compare edits.
 
 ## Something not working?

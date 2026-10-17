@@ -86,6 +86,10 @@ private:
     void shiftOctave (int delta);
     void loadPatch();
     void savePatch();
+    void showLoadMenu();
+    void showSaveMenu();
+    void saveUserPreset();
+    void loadPresetFile();
     void toggleCompare();
     juce::RangedAudioParameter& param (const char* id);
 

@@ -94,11 +94,21 @@ GenisysEditor::GenisysEditor (GenisysProcessor& p)
     loadButton.setBounds (836, 12, 48, 58);
     saveButton.setBounds (886, 12, 48, 58);
     compareButton.setBounds (936, 12, 52, 58);
-    setHelp (loadButton, "A - LOAD", "Load a Genesis FM patch from TFM Music Maker (.TFI), VGM Music Maker (.VGI) or DefleMask (.DMP).");
-    setHelp (saveButton, "B - SAVE", "Save this sound as a .TFI patch that other Genesis tools can open.");
+    setHelp (loadButton, "A - LOAD",
+             "Load a Genisys preset file a friend sent you, or import a Genesis FM patch from TFM Music Maker (.TFI), VGM Music "
+             "Maker (.VGI) or DefleMask (.DMP).");
+    setHelp (saveButton, "B - SAVE", "Save this sound as one of your presets (it appears under MY PRESETS), or export the FM part as a .TFI patch.");
     setHelp (compareButton, "C - COMPARE", "Flip between two versions of your sound (A and B) to compare edits.");
-    loadButton.onClick = [this] { loadPatch(); };
-    saveButton.onClick = [this] { savePatch(); };
+    loadButton.onClick = [this] { showLoadMenu(); };
+    saveButton.onClick = [this] { showSaveMenu(); };
+    cartridge.onSaveRequested = [this] { saveUserPreset(); };
+    lookAndFeel.setColour (juce::AlertWindow::backgroundColourId, theme::menuBottom);
+    lookAndFeel.setColour (juce::AlertWindow::textColourId, theme::text);
+    lookAndFeel.setColour (juce::AlertWindow::outlineColourId, theme::bevelLight);
+    lookAndFeel.setColour (juce::TextEditor::backgroundColourId, theme::screen);
+    lookAndFeel.setColour (juce::TextEditor::textColourId, theme::cyan);
+    lookAndFeel.setColour (juce::TextEditor::outlineColourId, theme::screenEdge);
+    lookAndFeel.setColour (juce::TextButton::buttonColourId, theme::menuTop);
     compareButton.onClick = [this] { toggleCompare(); };
 
     // Tabs and pages.
@@ -708,6 +718,79 @@ bool GenisysEditor::keyPressed (const juce::KeyPress& key)
     if (c == 'z') { shiftOctave (-1); return true; }
     if (c == 'x') { shiftOctave (1); return true; }
     return false;
+}
+
+void GenisysEditor::showLoadMenu()
+{
+    juce::PopupMenu menu;
+    menu.addItem (1, "Load a preset file (.genisyspreset)...");
+    menu.addItem (2, "Import a Genesis FM patch (.tfi / .vgi / .dmp)...");
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&loadButton),
+                        [this] (int result)
+                        {
+                            if (result == 1) loadPresetFile();
+                            if (result == 2) loadPatch();
+                        });
+}
+
+void GenisysEditor::showSaveMenu()
+{
+    juce::PopupMenu menu;
+    menu.addItem (1, "Save as one of my presets...");
+    menu.addItem (2, "Export the FM patch (.tfi)...");
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&saveButton),
+                        [this] (int result)
+                        {
+                            if (result == 1) saveUserPreset();
+                            if (result == 2) savePatch();
+                        });
+}
+
+void GenisysEditor::saveUserPreset()
+{
+    const auto info = genisys.getCurrentPresetInfo();
+    auto* window = new juce::AlertWindow ("SAVE PRESET", "Name your sound. It will appear under MY PRESETS in the cartridge menu.",
+                                          juce::MessageBoxIconType::NoIcon, this);
+    window->addTextEditor ("name", info.user ? info.name : info.name + " (mine)", "Name");
+    window->addTextEditor ("category", info.user ? info.category : juce::String ("User"), "Category");
+    window->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    juce::Component::SafePointer<GenisysEditor> safeThis (this);
+    window->enterModalState (true, juce::ModalCallbackFunction::create ([safeThis, window] (int result)
+    {
+        if (safeThis == nullptr || result != 1)
+            return;
+        const auto name = window->getTextEditorContents ("name").trim();
+        const auto category = window->getTextEditorContents ("category").trim();
+        if (name.isEmpty())
+        {
+            safeThis->help.show ("SAVE PRESET|Give the preset a name first.");
+            return;
+        }
+        auto& p = safeThis->genisys;
+        const auto file = p.presetLibrary.save (p.state, name, category);
+        if (file == juce::File())
+        {
+            safeThis->help.show ("SAVE PRESET|Couldn't save the preset.");
+            return;
+        }
+        p.loadUserPreset (file); // the cartridge now shows it
+        safeThis->help.show ("SAVED!|" + name + " is in MY PRESETS. Click the star to make it a favourite.");
+    }), true);
+}
+
+void GenisysEditor::loadPresetFile()
+{
+    chooser = std::make_unique<juce::FileChooser> ("Load a Genisys preset", juce::File(), "*.genisyspreset");
+    chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                          [this] (const juce::FileChooser& fc)
+                          {
+                              const auto file = fc.getResult();
+                              if (file == juce::File())
+                                  return;
+                              help.show (genisys.loadUserPreset (file) ? "LOADED|" + file.getFileNameWithoutExtension()
+                                                                       : "COULDN'T LOAD|" + file.getFileName() + " isn't a Genisys preset.");
+                          });
 }
 
 void GenisysEditor::loadPatch()
