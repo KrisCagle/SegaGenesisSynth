@@ -50,6 +50,19 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel ${{ matrix.build_jobs }} --target ${{ matrix.targets }}
 
+      # Logic and GarageBand only load AUs that pass Apple's own validator.
+      # (Pull-request CI no longer runs on macOS, so this is where it's
+      # checked.) Advisory: a failure shows in the run, but the zips still
+      # publish.
+      - name: Validate AU with auval
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        run: |
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R build/plugin/Genisys_artefacts/Release/AU/Genisys.component ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar || true
+          auval -strict -v aumu Gnsy Kcag
+
       - name: Package
         shell: bash
         run: |

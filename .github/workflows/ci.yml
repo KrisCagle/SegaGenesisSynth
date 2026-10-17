@@ -9,6 +9,9 @@ on:
 env:
   PLUGINVAL_VERSION: v1.0.4
 
+# Pull requests are checked on Windows and Linux only: GitHub's macOS
+# runners queue for a long time and often get cancelled. The macOS build
+# (and Apple's AU validator) runs in release.yml for every release.
 jobs:
   build-and-test:
     name: ${{ matrix.name }}
@@ -21,12 +24,6 @@ jobs:
             os: windows-latest
             pluginval: pluginval_Windows.zip
             pluginval_exe: ./pluginval.exe
-          - name: macOS
-            os: macos-latest
-            pluginval: pluginval_macOS.zip
-            pluginval_exe: ./pluginval.app/Contents/MacOS/pluginval
-            # One "universal" binary that runs on both Apple Silicon and Intel Macs.
-            cmake_extra: -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13
           - name: Linux
             os: ubuntu-latest
             pluginval: pluginval_Linux.zip
@@ -68,21 +65,11 @@ jobs:
           ${{ matrix.pluginval_exe }} --strictness-level 10 --validate-in-process ${{ matrix.pluginval_flags }} \
             --validate "build/plugin/Genisys_artefacts/Release/VST3/Genisys.vst3"
 
-      # Logic and GarageBand only load AUs that pass Apple's own validator.
-      - name: Validate AU with auval
-        if: runner.os == 'macOS'
-        run: |
-          mkdir -p ~/Library/Audio/Plug-Ins/Components
-          cp -R build/plugin/Genisys_artefacts/Release/AU/Genisys.component ~/Library/Audio/Plug-Ins/Components/
-          killall -9 AudioComponentRegistrar || true
-          auval -strict -v aumu Gnsy Kcag
-
       - name: Upload plugin
         uses: actions/upload-artifact@v4
         with:
           name: Genisys-${{ matrix.name }}
           path: |
             build/plugin/Genisys_artefacts/Release/VST3
-            build/plugin/Genisys_artefacts/Release/AU
             build/plugin/Genisys_artefacts/Release/Standalone
           if-no-files-found: error
