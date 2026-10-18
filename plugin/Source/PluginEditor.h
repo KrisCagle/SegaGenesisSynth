@@ -124,6 +124,7 @@ private:
     genisys::ui::LearnOverlay learnOverlay;
     genisys::ui::MappingList* mappingList = nullptr;
     genisys::ui::LedToggle* pickupToggle = nullptr;
+    genisys::ui::LedToggle* programChangeToggle = nullptr;
     bool learnMode = false;
     juce::String lastLearning;
     juce::uint32 shownMapVersion = 0;

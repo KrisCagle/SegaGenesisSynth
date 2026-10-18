@@ -183,7 +183,7 @@ void PresetCartridge::showMenu()
                             if (result <= 0)
                                 return;
                             if (result < kUserBase)
-                                processor.setCurrentProgram (result - 1);
+                                processor.selectPreset (result - 1);
                             else if (result < kFavoriteBase)
                                 processor.loadUserPreset (userPresets[(size_t) (result - kUserBase)].file);
                             else if (result < kToggleFavorite)
@@ -193,7 +193,7 @@ void PresetCartridge::showMenu()
                                 {
                                     for (int i = 0; i < processor.getNumPrograms(); ++i)
                                         if (PresetLibrary::factoryKey (processor.getProgramName (i)) == key)
-                                            processor.setCurrentProgram (i);
+                                            processor.selectPreset (i);
                                 }
                                 else
                                 {

@@ -47,6 +47,13 @@ public:
     void setCurrentProgram (int index) override;
     const juce::String getProgramName (int index) override;
 
+    // Loads a factory preset chosen inside Genisys (cartridge, arrow keys,
+    // MIDI buttons) and tells the host. Hosts keep their own copy of the
+    // current program: if it isn't updated, a host can later send the old
+    // one back and the preset seems to change by itself. (The host's own
+    // changes arrive through setCurrentProgram.) Message thread.
+    void selectPreset (int index);
+
     // Moves `delta` presets along, wrapping around. Message thread.
     void stepPreset (int delta);
 

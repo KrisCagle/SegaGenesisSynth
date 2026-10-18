@@ -104,10 +104,13 @@ void GenisysProcessor::handleMidi (const juce::MidiMessage& message)
     if (message.isController() && midiMap.handleController (message.getControllerNumber(), message.getControllerValue()))
         return;
 
-    // Program Change picks a preset by number (applied on the message thread).
+    // Program Change picks a preset by number (applied on the message
+    // thread), if switched on: keyboards and DAWs can send these without
+    // the player noticing, so by default they're ignored.
     if (message.isProgramChange())
     {
-        pendingProgram = message.getProgramChangeNumber();
+        if (midiMap.programChangeEnabled())
+            pendingProgram = message.getProgramChangeNumber();
         return;
     }
 
@@ -326,11 +329,17 @@ void GenisysProcessor::setCurrentProgram (int index)
     genisys::params::applyPreset (state, index);
 }
 
+void GenisysProcessor::selectPreset (int index)
+{
+    setCurrentProgram (index);
+    updateHostDisplay (ChangeDetails().withProgramChanged (true));
+}
+
 void GenisysProcessor::stepPreset (int delta)
 {
     const int n = getNumPrograms();
     if (n > 0 && delta != 0)
-        setCurrentProgram (((currentProgram + delta) % n + n) % n);
+        selectPreset (((currentProgram + delta) % n + n) % n);
 }
 
 bool GenisysProcessor::loadUserPreset (const juce::File& file)
@@ -342,6 +351,7 @@ bool GenisysProcessor::loadUserPreset (const juce::File& file)
     userPresetCategory = loaded.category;
     userPresetFile = file;
     ++presetChanges;
+    updateHostDisplay (ChangeDetails().withProgramChanged (true)); // keep the host's program in step
     return true;
 }
 
@@ -357,7 +367,7 @@ void GenisysProcessor::applyPendingPresetChanges()
 {
     const int program = pendingProgram.exchange (-1);
     if (program >= 0)
-        setCurrentProgram (program);
+        selectPreset (program);
     stepPreset (midiMap.takePresetSteps());
 }
 
