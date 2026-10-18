@@ -393,6 +393,8 @@ void GenisysEditor::refreshMidiMap()
             mappingList->refresh();
         if (pickupToggle != nullptr && pickupToggle->isOn() != map.pickupEnabled())
             pickupToggle->setOn (map.pickupEnabled());
+        if (programChangeToggle != nullptr && programChangeToggle->isOn() != map.programChangeEnabled())
+            programChangeToggle->setOn (map.programChangeEnabled());
         learnOverlay.repaint();
         // The map is saved with the project, so the project has changed.
         genisys.updateHostDisplay (juce::AudioProcessor::ChangeDetails().withNonParameterStateChanged (true));
@@ -569,13 +571,21 @@ void GenisysEditor::buildMidiPage (Page& page)
         y += 30;
     }
 
-    auto& pickup = page.add<LedToggle> ({ 16, 178, 260, 16 }, "PICKUP (NO JUMPS)");
+    auto& pickup = page.add<LedToggle> ({ 16, 168, 260, 16 }, "PICKUP (NO JUMPS)");
     pickupToggle = &pickup;
     pickup.setOn (genisys.midiMap.pickupEnabled());
     setHelp (pickup, "PICKUP",
              "On: a hardware knob only takes over once you turn it past the control's current setting, so sounds never jump. "
              "Off: the control follows the knob straight away.");
     pickup.onChange = [this] (bool on) { genisys.midiMap.setPickup (on); };
+
+    auto& programChange = page.add<LedToggle> ({ 16, 188, 270, 16 }, "PROGRAM CHANGE");
+    programChangeToggle = &programChange;
+    programChange.setOn (genisys.midiMap.programChangeEnabled());
+    setHelp (programChange, "PROGRAM CHANGE",
+             "On: MIDI Program Change messages from your keyboard or DAW pick presets by number. Off (normal): they're ignored, "
+             "so nothing can switch your sound by surprise.");
+    programChange.onChange = [this] (bool on) { genisys.midiMap.setProgramChange (on); };
 
     auto& setDefault = page.add<PixelButton> ({ 14, 210, 272, 24 }, "SET AS DEFAULT");
     setHelp (setDefault, "SET AS DEFAULT", "Every new Genisys you open starts with these links. Projects keep their own.");

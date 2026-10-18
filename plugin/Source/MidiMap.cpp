@@ -65,7 +65,7 @@ namespace
     }
 
     const juce::Identifier mapId ("MAP"), ccId ("cc"), paramIdKey ("param"), minId ("min"), maxId ("max"),
-        pickupId ("pickup");
+        pickupId ("pickup"), programChangeId ("programChange");
 }
 
 const juce::Identifier MidiMap::treeType ("MIDIMAP");
@@ -308,6 +308,7 @@ juce::ValueTree MidiMap::toValueTree() const
 {
     juce::ValueTree tree (treeType);
     tree.setProperty (pickupId, pickupEnabled(), nullptr);
+    tree.setProperty (programChangeId, programChangeEnabled(), nullptr);
     for (const auto& m : getMappings())
     {
         juce::ValueTree child (mapId);
@@ -326,6 +327,7 @@ void MidiMap::fromValueTree (const juce::ValueTree& tree)
         return;
     clear();
     pickup = (bool) tree.getProperty (pickupId, false);
+    programChange = (bool) tree.getProperty (programChangeId, false);
     for (const auto& child : tree)
         if (child.hasType (mapId))
             assign ((int) child.getProperty (ccId, -1), child.getProperty (paramIdKey).toString(),

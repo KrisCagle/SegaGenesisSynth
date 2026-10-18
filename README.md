@@ -81,7 +81,7 @@ The installer puts the VST3, the Audio Unit and the Standalone app in the right 
   - Use the **◀ ▶** arrows on the cartridge (or the **← →** arrow keys on your computer), or click its label for the full list.
   - **Your own presets:** press **B → Save as one of my presets**, or pick **Save current sound as a preset** in the cartridge menu. They appear under **My Presets** and include the FM sound, PSG layer, effects and play mode. Send the `.genisyspreset` file to a friend; they load it with **A → Load a preset file**.
   - **Favorites:** click the ★ on the cartridge. Starred presets are listed at the top of the cartridge menu.
-  - To step presets from your MIDI keyboard, right-click a cartridge arrow → **MIDI Learn** and press a pad or button. MIDI Program Change messages pick presets too.
+  - To step presets from your MIDI keyboard, right-click a cartridge arrow → **MIDI Learn** and press a pad or button. To let MIDI Program Change messages pick presets, switch on **PROGRAM CHANGE** on the MIDI tab (off by default).
 - **Hover for help:**
   - The black text box at the bottom explains whatever your mouse is over.
 - **Knobs:**

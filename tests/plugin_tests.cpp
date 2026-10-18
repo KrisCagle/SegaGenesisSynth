@@ -423,7 +423,12 @@ namespace
         midi.addEvent (juce::MidiMessage::programChange (1, 10), 0);
         process (*p, buffer, midi);
         p->applyPendingPresetChanges();
-        check (p->getCurrentProgram() == 10, "program change: picks the preset by number");
+        check (p->getCurrentProgram() == 0, "program change: ignored unless switched on (nothing switches the sound by surprise)");
+        map.setProgramChange (true);
+        midi.addEvent (juce::MidiMessage::programChange (1, 10), 0);
+        process (*p, buffer, midi);
+        p->applyPendingPresetChanges();
+        check (p->getCurrentProgram() == 10, "program change: when switched on, picks the preset by number");
 
         // The preset links survive a save and reload.
         juce::MemoryBlock saved;
@@ -641,6 +646,44 @@ namespace
         check (peak (buffer, 0, kBlock) > 0.01f, "expression: notes play with aftertouch");
     }
 
+    // Hosts keep their own copy of the current program. Every preset change
+    // made inside Genisys must update it, or the host can later send the old
+    // program back and the sound "resets" by itself (seen in Ableton, v0.2).
+    struct ProgramListener final : public juce::AudioProcessorListener
+    {
+        int programChanges = 0;
+        void audioProcessorParameterChanged (juce::AudioProcessor*, int, float) override {}
+        void audioProcessorChanged (juce::AudioProcessor*, const ChangeDetails& d) override
+        {
+            if (d.programChanged)
+                ++programChanges;
+        }
+    };
+
+    void testPresetChangesReachTheHost()
+    {
+        auto p = makeProcessor();
+        ProgramListener host;
+        p->addListener (&host);
+
+        p->selectPreset (7);
+        check (host.programChanges == 1 && p->getCurrentProgram() == 7, "host sync: picking a preset on the cartridge tells the host");
+        p->stepPreset (1);
+        check (host.programChanges == 2 && p->getCurrentProgram() == 8, "host sync: the arrow keys tell the host");
+
+        p->midiMap.clear();
+        p->midiMap.assign (60, genisys::MidiMap::nextPresetId);
+        sendCc (*p, 60, 127);
+        p->applyPendingPresetChanges();
+        check (host.programChanges == 3 && p->getCurrentProgram() == 9, "host sync: a MIDI preset button tells the host");
+
+        // The host setting the program itself must not echo back.
+        const int before = host.programChanges;
+        p->setCurrentProgram (12);
+        check (host.programChanges == before, "host sync: a program set by the host isn't reported back to it");
+        p->removeListener (&host);
+    }
+
     void testSustainPedal()
     {
         auto p = makeProcessor();
@@ -851,6 +894,7 @@ int main()
     testMidiMapSavedWithProject();
     testControllerLayouts();
     testPresetButtons();
+    testPresetChangesReachTheHost();
     testUserPresets();
     testArpeggiator();
     testUndoHistory();

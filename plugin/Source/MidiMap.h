@@ -66,6 +66,10 @@ namespace genisys
         bool pickupEnabled() const { return pickup.load(); }
         void setPickup (bool on) { pickup = on; ++version; }
 
+        // MIDI Program Change messages pick presets (off by default).
+        bool programChangeEnabled() const { return programChange.load(); }
+        void setProgramChange (bool on) { programChange = on; ++version; }
+
         // Goes up on every change (UI refresh; telling the host the project
         // changed).
         juce::uint32 getVersion() const { return version.load(); }
@@ -109,6 +113,7 @@ namespace genisys
         std::array<Slot, 128> slots;
         std::atomic<int> learnTarget { -1 };
         std::atomic<bool> pickup { false };
+        std::atomic<bool> programChange { false };
         std::atomic<juce::uint32> version { 0 };
 
         // Pickup state; audio thread only.
